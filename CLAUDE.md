@@ -1,6 +1,9 @@
 # Offerpath – notes for Claude Code sessions in this repo
 
-Offerpath finds jobs, prepares the user for interviews and guides them every day toward their goal. It is built from Job Hunter (`../job-hunter`) and ForgeRoutine (`../forge-routine`); the plan is in `docs/plan.md`. Nothing is built yet beyond the plan.
+Offerpath finds jobs, prepares the user for interviews and guides them every day toward their goal. It is built from Job Hunter (`../job-hunter`) and ForgeRoutine (`../forge-routine`); the plan is in `docs/plan.md`. Phase 0 (scaffold) is done: every app builds and has one smoke test; the features arrive in phases 1–6.
+
+- Checks: `pnpm check` runs everything CI runs. Prettier formats TS/JSON/YAML (single quotes); ESLint is one flat config at the root; Rust uses `cargo fmt` + clippy `-D warnings`.
+- Versions: never edit a version by hand; `pnpm release` stamps one version everywhere through `scripts/sync-versions.mjs`.
 
 - Surfaces: `apps/desktop` (Tauri, every feature), `apps/web` (supporter: the learning side plus a hunt remote control), `apps/mobile` (Flutter), `apps/api` (NestJS), `apps/sandbox` (code-execution worker).
 - **Claude CLI is the only AI**, run on the user's own desktop. Never add an API key, a vendor SDK (OpenAI, Anthropic API, Gemini), Codex, or any server-side AI call. The server stores data and relays; learning AI calls are jobs the API hands to the user's desktop.

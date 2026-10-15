@@ -1,0 +1,26 @@
+[package]
+name = "offerpath-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Offerpath desktop application (Tauri shell)"
+default-run = "offerpath-desktop"
+
+[lib]
+# Not `offerpath_desktop`: a lib and a bin with the same name collide in cargo's output.
+name = "offerpath_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "offerpath-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+offerpath-core = { path = "../../../crates/offerpath-core" }
+tauri = { version = "2", features = [] }
+serde.workspace = true
+serde_json.workspace = true

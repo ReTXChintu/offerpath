@@ -1,0 +1,22 @@
+{
+  "name": "@offerpath/sandbox",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Code-execution worker (BullMQ on the server's Redis). Ported from ForgeRoutine in phase 1.",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/main.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@offerpath/config": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}

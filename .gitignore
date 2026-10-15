@@ -1,10 +1,46 @@
+# Dependencies
 node_modules/
-dist/
+.pnpm-store/
+
+# Build output
 build/
-target/
-.turbo/
 .dart_tool/
+dist/
+dist-ssr/
+target/
+apps/desktop/src-tauri/gen/
+*.tsbuildinfo
+.turbo/
+
+# Environment / secrets: one root .env, never committed
 .env
 .env.*
 !.env.example
+
+# Firebase credentials and signing keys
+*firebase-adminsdk*.json
+google-services.json
+*.jks
+*.keystore
+key.properties
+*.b64
+
+# Uploaded app builds served by the API
+apps/api/downloads/
+
+# Logs
 *.log
+logs/
+
+# Editor / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# Test coverage
+coverage/
+
+# PM2 runtime files
+.pm2/

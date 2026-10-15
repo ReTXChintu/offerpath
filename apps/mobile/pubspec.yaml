@@ -1,0 +1,21 @@
+name: offerpath_mobile
+description: "Offerpath on your phone: today's plan, learning on the go, and approvals for your desktop's job hunt."
+publish_to: 'none'
+# X.Y.Z is the repo-wide version (`pnpm release` stamps it); +N is the build
+# number, which CI overrides with the run number.
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.13.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

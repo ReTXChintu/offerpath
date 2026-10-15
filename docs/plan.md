@@ -2,7 +2,7 @@
 
 > **Offerpath** — finds the jobs, gets you ready for the interviews, and moves you one step closer to the offer every day.
 
-Status: plan, 2026-10-15. Nothing built yet. Replaces the earlier merge study in
+Status: plan, 2026-10-15. Phase 0 (scaffold) done 2026-10-15. Replaces the earlier merge study in
 [job-hunter/docs/merge-plan.md](../../job-hunter/docs/merge-plan.md), whose "two services behind one gateway" approach no
 longer fits: this is a **new repository** that takes the best code from Job Hunter
 and ForgeRoutine, runs **one** backend on **one** database, and uses **Claude CLI as
@@ -30,7 +30,7 @@ its only AI**.
 
 | What | Value |
 |---|---|
-| Repo / folder | `offerpath` (`D:\Personal\offerpath`) |
+| Repo / folder | `offerpath` (`D:\Personal\offerpath-workspace\offerpath`) |
 | npm scope | `@offerpath/*` |
 | Rust crates | `offerpath-core`, desktop crate `offerpath-desktop` |
 | Desktop app id | `app.offerpath.desktop` (product name "Offerpath") |

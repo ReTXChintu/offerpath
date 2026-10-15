@@ -1,0 +1,16 @@
+// Offerpath data model, on PostgreSQL (Neon).
+//
+// Phase 1 moves ForgeRoutine's models in unchanged and adds devices,
+// sync_documents, notifications, ai_jobs, goals and daily_plans
+// (docs/plan.md, section 4.1). Every user-owned row carries a user id.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  // Pooled connection for the app; direct connection for migrations.
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_DATABASE_URL")
+}

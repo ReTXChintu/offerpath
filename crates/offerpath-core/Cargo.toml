@@ -1,0 +1,9 @@
+[package]
+name = "offerpath-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Offerpath core: hunt pipeline, Claude runner, local store, sync, approval gating and the AI-job executor"
+
+[dependencies]

@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typescript:
+    name: TypeScript (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    services:
+      # Phase 1's API tests run against this; the Prisma checks below already do.
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: offerpath
+          POSTGRES_PASSWORD: offerpath
+          POSTGRES_DB: offerpath_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://offerpath:offerpath@localhost:5432/offerpath_test?schema=public
+      DIRECT_DATABASE_URL: postgresql://offerpath:offerpath@localhost:5432/offerpath_test?schema=public
+    steps:
+      - uses: actions/checkout@v4
+      # No `version:`: package.json's `packageManager` is the single source of truth.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: node scripts/sync-versions.mjs --check
+      - run: pnpm format:check
+      - name: Apply migrations
+        run: pnpm --filter @offerpath/database exec prisma migrate deploy
+      - name: Migrations match the schema
+        # Catches a schema edit committed without its migration.
+        run: |
+          pnpm --filter @offerpath/database exec prisma migrate diff \
+            --from-migrations prisma/migrations \
+            --to-schema-datamodel prisma/schema.prisma \
+            --shadow-database-url "$DATABASE_URL" \
+            --exit-code && echo "Schema and migrations agree"
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm build
+
+  rust:
+    name: Rust
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      # tauri::generate_context! needs the frontend's dist folder to exist.
+      - run: mkdir -p apps/desktop/dist
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+
+  mobile:
+    name: Flutter
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.2
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+      # Packaging fails in ways analyze and test don't catch, so build the
+      # release APK too. The server URL is a placeholder here.
+      - run: flutter build apk --release --dart-define=OFFERPATH_SERVER_URL=http://localhost:50010
