@@ -8,7 +8,7 @@ Offerpath finds jobs, prepares the user for interviews and guides them every day
 - Surfaces: `apps/desktop` (Tauri, every feature), `apps/web` (supporter: the learning side plus a hunt remote control), `apps/mobile` (Flutter), `apps/api` (NestJS), `apps/sandbox` (code-execution worker).
 - **Claude CLI is the only AI**, run on the user's own desktop. Never add an API key, a vendor SDK (OpenAI, Anthropic API, Gemini), Codex, or any server-side AI call. The server stores data and relays; learning AI calls are jobs the API hands to the user's desktop.
 - Database: PostgreSQL on Neon (free tier, may sleep; retry the connection). Redis: the server's existing instance, key prefix `offerpath:`.
-- Hosting: `http://<server-ip>:<port>` on one port (default 50010). No nginx: Traefik owns 80/443 on the server. The API serves REST, the WebSocket hub, downloads, updates and the web app.
+- Hosting: `http://<server-ip>:<port>`, web app on 50004 (PM2 static server), API on 50005 (REST, WebSocket hub, downloads, updates; CORS allows the web origin). No nginx: Traefik owns 80/443 on the server.
 - Multi-user with open sign-up; every row and synced document is scoped by user id.
 - Approval gating lives in the Rust core and is never weakened; learning AI jobs never reach the hunt dispatcher, Chrome, local files or `--resume`.
 - The tutor's assistance policy (no code below SHOW_SOLUTION) and its regression tests are binding.

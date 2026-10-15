@@ -5,5 +5,5 @@ Flutter app, Android id `app.offerpath.mobile`. Phase 5 brings in Job Hunter's a
 ```bash
 flutter pub get
 flutter test
-flutter build apk --release --dart-define=OFFERPATH_SERVER_URL=http://<server-ip>:50010
+flutter build apk --release --dart-define=OFFERPATH_SERVER_URL=http://<server-ip>:50005
 ```

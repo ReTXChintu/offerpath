@@ -25,6 +25,7 @@
     "db:migrate": "pnpm --filter @offerpath/database migrate",
     "db:deploy": "pnpm --filter @offerpath/database migrate:deploy",
     "db:studio": "pnpm --filter @offerpath/database studio",
+    "db:import:job-hunter": "pnpm --filter @offerpath/database import:job-hunter",
     "server:build": "turbo run build --filter=@offerpath/api... --filter=@offerpath/web... --filter=@offerpath/sandbox...",
     "server:start": "pm2 startOrReload ecosystem.config.cjs --update-env",
     "server:stop": "pm2 stop ecosystem.config.cjs",

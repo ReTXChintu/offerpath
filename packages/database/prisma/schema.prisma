@@ -1,8 +1,8 @@
 // Offerpath data model, on PostgreSQL (Neon).
 //
 // Phase 1 moves ForgeRoutine's models in unchanged and adds devices,
-// sync_documents, notifications, ai_jobs, goals and daily_plans
-// (docs/plan.md, section 4.1). Every user-owned row carries a user id.
+// notifications, ai_jobs, goals and daily_plans (docs/plan.md, section 4.1).
+// Every user-owned row carries a user id.
 
 generator client {
   provider = "prisma-client-js"
@@ -13,4 +13,51 @@ datasource db {
   // Pooled connection for the app; direct connection for migrations.
   url       = env("DATABASE_URL")
   directUrl = env("DIRECT_DATABASE_URL")
+}
+
+// ===========================================================================
+// Identity
+// ===========================================================================
+
+/// ForgeRoutine's `users` table, column for column, so its rows move in as
+/// they are. Job Hunter accounts are matched to it by email; both apps hash
+/// passwords with bcrypt, so hashes are copied unchanged.
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  passwordHash  String
+  displayName   String
+  emailVerified Boolean   @default(false)
+  lastLoginAt   DateTime?
+  archivedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  syncDocuments SyncDocument[]
+
+  @@index([archivedAt])
+  @@map("users")
+}
+
+// ===========================================================================
+// Hunt data synced from the desktop
+// ===========================================================================
+
+/// One document of the desktop's local-first store (jobs, applications,
+/// resumes, ...), as the Rust sync layer sends it. `collection` is one of the
+/// core's domain collections; `id` is unique only within one user's
+/// collection. Deletes are soft so other devices can sync them.
+model SyncDocument {
+  userId     String
+  collection String
+  id         String
+  doc        Json
+  updatedAt  DateTime
+  deletedAt  DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, collection, id])
+  @@index([userId, collection, updatedAt])
+  @@map("sync_documents")
 }

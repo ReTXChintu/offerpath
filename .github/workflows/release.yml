@@ -1,7 +1,7 @@
 # Builds the Windows installer and the Android APK for a version tag
 # (v1.2.3, pushed by `pnpm release`) and publishes them as a GitHub Release.
 # Both builds get the server address from the OFFERPATH_SERVER_URL secret,
-# e.g. http://203.0.113.10:50010.
+# e.g. http://203.0.113.10:50005.
 #
 # Later phases add: the signed Tauri updater artifacts, the release signing
 # key for Android, Firebase config, and the upload + server update over SSH.
@@ -27,7 +27,7 @@ jobs:
           OFFERPATH_SERVER_URL: ${{ secrets.OFFERPATH_SERVER_URL }}
         run: |
           if [ -z "$OFFERPATH_SERVER_URL" ]; then
-            echo "::error::Set the OFFERPATH_SERVER_URL repository secret, e.g. http://203.0.113.10:50010"
+            echo "::error::Set the OFFERPATH_SERVER_URL repository secret, e.g. http://203.0.113.10:50005"
             exit 1
           fi
           node scripts/sync-versions.mjs --check

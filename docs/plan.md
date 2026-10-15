@@ -20,7 +20,7 @@ its only AI**.
 | Server | Same box (`187.127.179.114`). Job Hunter and ForgeRoutine are removed from it after the data is moved; Offerpath takes their place. |
 | Database | PostgreSQL on Neon (external, free tier; sleeping when idle is fine). ForgeRoutine's database is already on Neon. MongoDB Atlas is retired after migration. |
 | Redis | The one already on the server, reused, with an `offerpath:` key prefix. |
-| Hosting | `http://<server-ip>:<port>`, no nginx (Traefik already owns ports 80 and 443 on the server). The API serves everything on one port. |
+| Hosting | `http://<server-ip>:<port>`, no nginx (Traefik already owns ports 80 and 443 on the server). Web app on 50004, API on 50005. |
 | Users | Multi-user, **open sign-up**: anyone can create an account and set it up for their own goal, on their own desktop with their own Claude. |
 | Workspace | `D:\Personal\offerpath-workspace\` holds `offerpath\` (this repo, new code), `job-hunter\` and `forge-routine\` (the two source apps, for reference and data migration). |
 
@@ -212,15 +212,14 @@ Password fields get the show/hide eye button with "Show password" / "Hide passwo
 
 ## 7. Server
 
-- **One public port, no reverse proxy.** Traefik already holds 80 and 443 on the server, so Offerpath is reached as `http://<server-ip>:<port>`, like the two apps today. The API process serves everything on that one port:
-  - `/api/v1/*` REST and `/api/v1/hub` WebSocket
-  - `/downloads/*` (APK, Windows installer) and `/updates/*` (Tauri updater manifest)
-  - `/` the built web app (single-page app with history fallback)
+- **Two public ports, no reverse proxy** (decided 2026-10-15). Traefik already holds 80 and 443 on the server, so Offerpath is reached as `http://<server-ip>:<port>`, like the two apps today:
+  - **50004** (`OFFERPATH_WEB_PORT`): the built web app, PM2's static server in single-page mode.
+  - **50005** (`OFFERPATH_API_PORT`): the API: `/api/v1/*` REST and `/api/v1/hub` WebSocket, `/downloads/*` (APK, Windows installer) and `/updates/*` (Tauri updater manifest). CORS allows the web app's origin (`OFFERPATH_CORS_ORIGINS`).
 
-  One origin means one address compiled into the desktop and the phone (`OFFERPATH_SERVER_URL`), no CORS, and one port to open.
-- **Port:** `50010` (configurable, `OFFERPATH_PORT`), so Offerpath can run next to Job Hunter (50007) and ForgeRoutine (50004–50006) during the migration without a clash. The old ports close when the old apps are removed.
-- **Processes (PM2):** `offerpath-api` (the above) and `offerpath-sandbox` (code-execution worker, no port; it talks to the API through Redis/BullMQ).
-- **TLS later, optionally:** since Traefik is already on the server, a domain can be routed to `:50010` with a Let's Encrypt certificate without touching the app. That's a client-config change (a new server URL), not a rewrite. Until then it's plain HTTP like today: the desktop updater keeps its signed-manifest check, and the APK allows cleartext to the server.
+  The desktop and the phone get the API address compiled in (`OFFERPATH_SERVER_URL`).
+- **These are ForgeRoutine's ports today.** ForgeRoutine's web and API must be stopped on the server before Offerpath starts there, so on the server the two can't run side by side; rehearse the cutover locally or on a Neon branch instead.
+- **Processes (PM2):** `offerpath-api`, `offerpath-web` and `offerpath-sandbox` (code-execution worker, no port; it talks to the API through Redis/BullMQ).
+- **TLS later, optionally:** since Traefik is already on the server, a domain can be routed to `:50004` and `:50005` with a Let's Encrypt certificate without touching the app. That's a client-config change (a new server URL), not a rewrite. Until then it's plain HTTP like today: the desktop updater keeps its signed-manifest check, and the APK allows cleartext to the server.
 - **Neon (free tier):** pooled `DATABASE_URL` for the app, direct `DIRECT_DATABASE_URL` for `prisma migrate deploy`. The database sleeps when idle; the first request after a pause takes a few seconds, and the API retries the connection instead of failing. Neon branches give a throwaway copy for migration rehearsals. Watch the free storage limit (0.5 GB): job descriptions and run events are the biggest rows, so old agent events are pruned after 30 days.
 - **Redis:** the existing server Redis, `offerpath:` prefix, for BullMQ (code execution, AI-job delivery), rate limits and cache.
 - **Deploy:** tag → CI builds the Windows installer (signed updater) and the APK → uploads them → SSH `git pull && scripts/server-update.sh` (install, `prisma migrate deploy`, build, `pm2 reload`). Push/PR CI runs Rust, TS, Flutter and the API's Postgres-backed tests.
@@ -247,9 +246,13 @@ Each phase ends with something that runs. Weeks assume near full-time solo work.
 
 Rehearsed on a Neon branch with `--dry-run` first; the old apps keep running until the final step.
 
-1. **ForgeRoutine's Neon database → Offerpath's:** a new database in the same Neon project, filled with `pg_dump` / `pg_restore` from ForgeRoutine's, then Offerpath's migrations on top. Drop `ai_credentials`. ForgeRoutine's own database stays untouched until the cutover is done, so it keeps running meanwhile.
-2. **Job Hunter accounts (MongoDB) → `users`:** matched by email (bcrypt hashes copied as they are, so no password resets). Your own account exists in both: it keeps the ForgeRoutine user id and the hunt data is re-pointed to it.
+The `offerpath` database exists in ForgeRoutine's Neon project (created 2026-10-15), and steps 2 and 3 have run (see below), so step 1 comes last.
+
+1. **ForgeRoutine's Neon database → Offerpath's:** once phase 1 has ported ForgeRoutine's models, copy its rows into the `offerpath` database. Because `users` already holds the imported accounts, this is a script and not a plain `pg_dump` / `pg_restore`: upsert `users` by id (an account matched from Job Hunter already carries its ForgeRoutine id), then copy the other tables as they are. Skip `ai_credentials`. ForgeRoutine's own database stays untouched until the cutover is done, so it keeps running meanwhile.
+2. **Job Hunter accounts (MongoDB) → `users`:** matched by email (bcrypt hashes copied as they are, so no password resets). An account whose email is also in ForgeRoutine takes the ForgeRoutine identity (id, password, name), so your account keeps its ForgeRoutine id and the hunt data is re-pointed to it.
 3. **Job Hunter synced data (MongoDB) → `sync_documents`:** every domain collection (jobs, analyses, applications, resumes, cover letters, answers, runs, events, notifications, settings, profile, experiences, projects).
+
+   Steps 2 and 3 are `pnpm db:import:job-hunter [--dry-run]` (`packages/database/src/import/job-hunter.ts`). First run 2026-10-15: 2 accounts and 4,854 documents, each checked identical to its MongoDB copy. The script can be re-run: users are never overwritten, documents are upserted, and anything deleted in Job Hunter since is soft-deleted. **Run it again just before the cutover**, because Job Hunter keeps writing to MongoDB until then.
 4. **Desktop-only data:** on first start, the Offerpath desktop offers to import `%APPDATA%\JobHunter` (local-only collections such as job-site profiles, publishing plan, scan cursors and the queue; settings; generated resume files; the Claude/Chrome setup).
 5. **Devices:** not migrated. Every desktop and phone signs in to Offerpath fresh.
 6. **Server cleanup, last:** stop and delete the PM2 apps `job-hunter-backend`, `forgeroutine-api`, `forgeroutine-web`, `forgeroutine-sandbox`; remove `/opt/var/job-hunter` and `/opt/var/forge-routine` after a final backup; close their ports; retire MongoDB Atlas and ForgeRoutine's Neon database once Offerpath has run cleanly for a while.

@@ -18,9 +18,21 @@ export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
 
-  /** One port serves REST, the hub WebSocket, downloads, updates and the web app. */
-  OFFERPATH_PORT: z.coerce.number().int().min(1).max(65_535).default(50010),
+  /** The API: REST, the hub WebSocket, downloads and updates. */
+  OFFERPATH_API_PORT: z.coerce.number().int().min(1).max(65_535).default(50005),
+  /** The built web app, served as static files by PM2. */
+  OFFERPATH_WEB_PORT: z.coerce.number().int().min(1).max(65_535).default(50004),
   OFFERPATH_HOST: z.string().default('0.0.0.0'),
+  /** Origins allowed to call the API from a browser, comma-separated (the web app's address). */
+  OFFERPATH_CORS_ORIGINS: z
+    .string()
+    .default('http://localhost:50004')
+    .transform((v) =>
+      v
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
+    ),
   /** Open sign-up can be closed later without a release. */
   OFFERPATH_SIGNUP: z.enum(['open', 'closed']).default('open'),
 

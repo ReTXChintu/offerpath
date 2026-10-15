@@ -100,4 +100,4 @@ jobs:
       - run: flutter test
       # Packaging fails in ways analyze and test don't catch, so build the
       # release APK too. The server URL is a placeholder here.
-      - run: flutter build apk --release --dart-define=OFFERPATH_SERVER_URL=http://localhost:50010
+      - run: flutter build apk --release --dart-define=OFFERPATH_SERVER_URL=http://localhost:50005

@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 
 /// The server this build talks to, compiled in by CI
-/// (`--dart-define=OFFERPATH_SERVER_URL=http://<server-ip>:50010`).
+/// (`--dart-define=OFFERPATH_SERVER_URL=http://<server-ip>:50005`).
 const serverUrl = String.fromEnvironment(
   'OFFERPATH_SERVER_URL',
-  defaultValue: 'http://10.0.2.2:50010',
+  defaultValue: 'http://10.0.2.2:50005',
 );
 
 void main() {
