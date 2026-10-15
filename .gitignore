@@ -1,0 +1,10 @@
+node_modules/
+dist/
+build/
+target/
+.turbo/
+.dart_tool/
+.env
+.env.*
+!.env.example
+*.log
