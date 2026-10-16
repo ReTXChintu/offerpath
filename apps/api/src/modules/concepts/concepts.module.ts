@@ -14,6 +14,6 @@ import { ConceptsController } from './http/concepts.controller.js';
   imports: [SkillsModule, GenerationModule, RoutinesModule, SettingsModule],
   controllers: [ConceptsController],
   providers: [ConceptsService, ConceptTutorService, PracticeSetService],
-  exports: [ConceptsService, PracticeSetService],
+  exports: [ConceptsService, ConceptTutorService, PracticeSetService],
 })
 export class ConceptsModule {}

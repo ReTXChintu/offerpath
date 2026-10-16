@@ -27,6 +27,7 @@ import { SkillsModule } from './modules/skills/skills.module.js';
 import { SubmissionsModule } from './modules/submissions/submissions.module.js';
 import { SyncModule } from './modules/sync/sync.module.js';
 import { TechnologiesModule } from './modules/technologies/technologies.module.js';
+import { TodayModule } from './modules/today/today.module.js';
 
 /**
  * A modular monolith (§45.15-16). One deployable process, split by business
@@ -67,6 +68,9 @@ import { TechnologiesModule } from './modules/technologies/technologies.module.j
     DevicesModule,
     SyncModule,
     DownloadsModule,
+
+    // The goal and the daily plan across both
+    TodayModule,
   ],
 })
 export class AppModule {}

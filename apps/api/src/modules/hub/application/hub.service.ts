@@ -365,6 +365,13 @@ export class HubService implements OnApplicationBootstrap, OnModuleDestroy {
 
   // -- Presence -----------------------------------------------------------------
 
+  /** Accounts whose desktop is connected and has Claude available. */
+  aiReadyUsers(): string[] {
+    return [...this.users.entries()]
+      .filter(([, c]) => c.desktop?.info?.claude.available)
+      .map(([userId]) => userId);
+  }
+
   isDesktopOnline(userId: string): boolean {
     return !!this.users.get(userId)?.desktop;
   }

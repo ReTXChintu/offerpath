@@ -39,6 +39,8 @@ model User {
   pairingCodes      PairingCode[]
   syncDocuments     SyncDocument[]
   aiJobs            AiJob[]
+  goal              Goal?
+  dailyPlans        DailyPlan[]
   conceptChats      ConceptChatMessage[]
   questionAnswers   ConceptQuestionAnswer[]
   assignments       PracticeAssignment[]
@@ -1422,4 +1424,45 @@ model AiJob {
   @@index([userId, status, createdAt])
   @@index([status, createdAt])
   @@map("ai_jobs")
+}
+
+// ===========================================================================
+// The goal and the daily plan (docs/plan.md, section 3)
+// ===========================================================================
+
+/// What the user is working toward. One per user, set in onboarding.
+model Goal {
+  userId          String    @id
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// "Backend engineer", "Senior React developer", ...
+  targetRoles     String[]  @default([])
+  targetCompanies String[]  @default([])
+  locations       String[]  @default([])
+  /// When the user wants an offer by. Optional.
+  targetDate      DateTime? @db.Date
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@map("goals")
+}
+
+/// One user's day: when it was planned and started, and what it held.
+/// The plan itself is assembled live from the routine and the hunt; this
+/// row is the record behind the streak and "Start my day".
+model DailyPlan {
+  id             String    @id @default(cuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// The learning day (06:00 boundary in the app's zone).
+  date           DateTime  @db.Date
+  /// When the day's AI content was prepared ahead on the desktop.
+  pregeneratedAt DateTime?
+  startedAt      DateTime?
+  /// Counts at the time of the last look, for history.
+  summary        Json      @default("{}")
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([userId, date])
+  @@map("daily_plans")
 }
