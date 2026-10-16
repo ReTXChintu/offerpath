@@ -82,7 +82,17 @@ async fn search_only_then_prepare_the_best_matches() {
     .await
     .unwrap();
     wait_idle(&ctx).await;
-    let prepare: AgentRun = ctx.store.require(&prepare.id).unwrap();
+    // Right after the start the agent can still read as idle before the run
+    // leaves Initializing; wait for the run itself to move on.
+    let mut prepare: AgentRun = ctx.store.require(&prepare.id).unwrap();
+    for _ in 0..6000 {
+        if prepare.state != AgentState::Initializing && !ctx.agent.status().await.state.is_running()
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        prepare = ctx.store.require(&prepare.id).unwrap();
+    }
     assert!(prepare.prepare_only);
     assert_eq!(prepare.stats.jobs_discovered, 0, "no new search");
     assert_eq!(prepare.state, AgentState::WaitingForApproval);
