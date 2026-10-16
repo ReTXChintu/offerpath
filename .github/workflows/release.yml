@@ -63,6 +63,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: pnpm install --frozen-lockfile
+      # The desktop's frontend imports the workspace packages' built output
+      # (@offerpath/ui, hunt, learn, ...), so build those first.
+      - name: Build the packages the desktop uses
+        run: pnpm turbo run build --filter="@offerpath/desktop^..."
       - name: Build installer
         env:
           # Both read at compile time: crates/offerpath-core/src/backend_url.rs
