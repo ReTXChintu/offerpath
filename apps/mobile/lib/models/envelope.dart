@@ -1,8 +1,8 @@
 import 'dart:convert';
 
-/// The one WebSocket frame shape spoken with the relay. Mirrors
-/// `docs/mobile-protocol.md` and the Rust side in
-/// `crates/job-hunter-core/src/remote/protocol.rs` -- keep all three in
+/// The one WebSocket frame shape spoken over the hub. Mirrors
+/// `docs/hub-protocol.md` and the Rust side in
+/// `crates/offerpath-core/src/remote/protocol.rs` -- keep all three in
 /// sync by hand when the protocol changes.
 class Envelope {
   final int v;

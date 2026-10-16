@@ -2,7 +2,7 @@ import 'application.dart';
 import 'json.dart';
 
 /// Mirrors the Rust `Job` / `JobAnalysis` structs (see
-/// `crates/job-hunter-core/src/domain/job.rs` and `packages/types`), trimmed
+/// `crates/offerpath-core/src/domain/job.rs` and `packages/types`), trimmed
 /// to what the phone shows. Parsing never throws on a missing field.
 class Job {
   final String id;

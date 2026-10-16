@@ -6,7 +6,7 @@ import '../state/connection_controller.dart';
 import '../util/format.dart';
 import 'common.dart';
 
-/// Says when the desktop can't be reached right now, from the relay's own
+/// Says when the desktop can't be reached right now, from the hub's own
 /// `presence` push (never a guess made on the phone). Shows nothing while
 /// everything is fine.
 class PresenceBanner extends StatelessWidget {

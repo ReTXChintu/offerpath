@@ -1,7 +1,7 @@
 import 'json.dart';
 
 /// One task waiting for the desktop's agent (Rust `QueuedTask`, see
-/// `docs/mobile-protocol.md` `list_queue`). Runs by itself, in order, once
+/// `docs/hub-protocol.md` `list_queue`). Runs by itself, in order, once
 /// the agent is free.
 class QueuedTaskItem {
   final String id;

@@ -41,7 +41,7 @@ class DashboardCounts {
 /// Trimmed `AgentStatus` the desktop pushes as `agent_status` (and returns
 /// from `get_agent_status`): state, whether it's paused, what kind of run,
 /// and progress when known. Never the free-text activity (see
-/// `docs/mobile-protocol.md`).
+/// `docs/hub-protocol.md`).
 class AgentStatusLite {
   final String state;
   final bool paused;

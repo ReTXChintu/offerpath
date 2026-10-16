@@ -14,7 +14,7 @@ import 'data_source.dart';
 /// The applications list/detail data and the actions a phone may take on
 /// them. Every action is one `connection.request(...)` call that reaches the
 /// exact same desktop-side `orchestrator` function the Tauri UI calls (see
-/// `crates/job-hunter-core/src/remote/dispatch.rs`) -- this class never
+/// `crates/offerpath-core/src/remote/dispatch.rs`) -- this class never
 /// decides an application's fate on its own, it only asks the desktop to.
 /// Reads come from the desktop when it's online, else from what it last
 /// synced to the server.
