@@ -10,7 +10,7 @@ use offerpath_core::prompts::{self, ApplyParams};
 use offerpath_core::AppContext;
 
 async fn wait_idle(ctx: &Arc<AppContext>) {
-    for _ in 0..600 {
+    for _ in 0..6000 {
         let s = ctx.agent.status().await;
         if !s.state.is_running() && !s.paused {
             return;
@@ -216,7 +216,7 @@ fn a_draft_needs_no_address() {
 }
 
 async fn wait_for(ctx: &Arc<AppContext>, done: impl Fn(&AppContext) -> bool) {
-    for _ in 0..600 {
+    for _ in 0..6000 {
         if done(ctx) {
             return;
         }

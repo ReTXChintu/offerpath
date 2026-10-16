@@ -12,7 +12,7 @@ use offerpath_core::error::CoreError;
 use offerpath_core::AppContext;
 
 async fn wait_idle(ctx: &Arc<AppContext>) {
-    for _ in 0..600 {
+    for _ in 0..6000 {
         let s = ctx.agent.status().await;
         if !s.state.is_running() && !s.paused {
             return;

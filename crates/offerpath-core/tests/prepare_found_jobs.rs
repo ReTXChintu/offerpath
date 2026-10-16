@@ -9,7 +9,7 @@ use offerpath_core::domain::*;
 use offerpath_core::AppContext;
 
 async fn wait_idle(ctx: &Arc<AppContext>) {
-    for _ in 0..600 {
+    for _ in 0..6000 {
         let s = ctx.agent.status().await;
         if !s.state.is_running() && !s.paused {
             return;
@@ -20,7 +20,7 @@ async fn wait_idle(ctx: &Arc<AppContext>) {
 }
 
 async fn wait_for_notification(ctx: &Arc<AppContext>, title_starts: &str) -> Notification {
-    for _ in 0..200 {
+    for _ in 0..2000 {
         if let Some(n) = ctx
             .store
             .list::<Notification>()

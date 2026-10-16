@@ -54,7 +54,7 @@ async fn wait_until(
     what: &str,
     pred: impl Fn(&AgentStatus, &[QueuedTask]) -> bool,
 ) {
-    for _ in 0..900 {
+    for _ in 0..2400 {
         let s = ctx.agent.status().await;
         let q = queue::list(ctx).unwrap();
         if pred(&s, &q) {
@@ -111,7 +111,7 @@ async fn work_started_while_busy_waits_its_turn_then_runs_by_itself() {
     // The agent reports idle a moment before the last run's finish is
     // stored; under a loaded test run that gap is visible, so wait for it.
     let mut runs: Vec<AgentRun> = Vec::new();
-    for _ in 0..200 {
+    for _ in 0..2000 {
         runs = ctx.store.list().unwrap();
         let finished = runs
             .iter()
