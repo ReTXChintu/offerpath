@@ -76,7 +76,7 @@ export function AgentStatusBar({ children }: { children?: ReactNode }) {
             ? s.error
             : (last?.message ?? '')}
       </div>
-      {running && s?.progress != null ? (
+      {running && s && s.progress !== null ? (
         <div className="row items-center g2" style={{ minWidth: 140 }}>
           <div className="flex-1">
             <ProgressBar pct={s.progress} thin label="Agent progress" />

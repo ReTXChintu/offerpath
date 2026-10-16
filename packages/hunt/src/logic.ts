@@ -145,7 +145,7 @@ export function locationOptions(
   for (const job of jobs) {
     const seen = new Set<string>();
     const parts = job.location
-      .split(/[,/|•·()\[\]\-–—]|\band\b|\bor\b/i)
+      .split(/[,/|•·()[\]\-–—]|\band\b|\bor\b/i)
       .map((p) => p.replace(/\s+/g, ' ').trim())
       .filter(
         (p) =>
