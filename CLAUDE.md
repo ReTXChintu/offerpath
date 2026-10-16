@@ -1,6 +1,6 @@
 # Offerpath – notes for Claude Code sessions in this repo
 
-Offerpath finds jobs, prepares the user for interviews and guides them every day toward their goal. It is built from Job Hunter (`../job-hunter`) and ForgeRoutine (`../forge-routine`); the plan is in `docs/plan.md`. Phases 0 (scaffold) and 1 (API) are done; the device protocol is in `docs/hub-protocol.md`. The API runs every AI call as an `ai_jobs` row handed to the user's desktop over the hub.
+Offerpath finds jobs, prepares the user for interviews and guides them every day toward their goal. It is built from Job Hunter (`../job-hunter`) and ForgeRoutine (`../forge-routine`); the plan is in `docs/plan.md`. Phases 0-6 are done (see `docs/plan.md`); the device protocol is in `docs/hub-protocol.md`, deployment and cutover in `docs/deploy.md`. The API runs every AI call as an `ai_jobs` row handed to the user's desktop over the hub.
 
 - Checks: `pnpm check` runs everything CI runs. Prettier formats TS/JSON/YAML (single quotes); ESLint is one flat config at the root; Rust uses `cargo fmt` + clippy `-D warnings`.
 - Versions: never edit a version by hand; `pnpm release` stamps one version everywhere through `scripts/sync-versions.mjs`.

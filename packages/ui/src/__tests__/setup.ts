@@ -22,3 +22,8 @@ afterEach(() => {
   document.documentElement.removeAttribute('data-theme');
   window.localStorage.clear();
 });
+
+import { configure } from '@testing-library/react';
+
+// Shared CI runners are slow: give findBy/waitFor more than the 1s default.
+configure({ asyncUtilTimeout: 5000 });

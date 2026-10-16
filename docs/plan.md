@@ -2,7 +2,7 @@
 
 > **Offerpath** — finds the jobs, gets you ready for the interviews, and moves you one step closer to the offer every day.
 
-Status: plan, 2026-10-15. Phase 0 (scaffold) done 2026-10-15; phase 1 (API) done 2026-10-16. Replaces the earlier merge study in
+Status: plan, 2026-10-15. Phases 0-6 done 2026-10-16 (scaffold, API, desktop, learning UI, web, mobile, goal and daily plan); phase 7 (cutover) prepared, see docs/deploy.md. Replaces the earlier merge study in
 [job-hunter/docs/merge-plan.md](../../job-hunter/docs/merge-plan.md), whose "two services behind one gateway" approach no
 longer fits: this is a **new repository** that takes the best code from Job Hunter
 and ForgeRoutine, runs **one** backend on **one** database, and uses **Claude CLI as
