@@ -1,0 +1,245 @@
+import { describe, expect, it } from 'vitest';
+import type { ApplicationListItem, CandidateProfile, JobListItem } from '../types';
+import {
+  applicationActions,
+  filterJobs,
+  guessSkillGroup,
+  isAgentRunning,
+  locationOptions,
+  matchesLocation,
+  normalizeQuestion,
+  pendingApplications,
+  profileIssues,
+  sortJobs,
+  splitList,
+  statusTone,
+} from '../logic';
+
+function job(
+  over: Partial<JobListItem['job']>,
+  analysis: Partial<NonNullable<JobListItem['analysis']>> | null = null,
+): JobListItem {
+  const base: JobListItem['job'] = {
+    id: over.id ?? 'j',
+    userId: 'u',
+    discoveredAt: '2026-09-24T00:00:00Z',
+    postedAt: null,
+    source: 'LinkedIn',
+    sourceJobId: null,
+    url: 'https://x',
+    canonicalUrl: null,
+    company: 'Acme',
+    title: 'Engineer',
+    location: 'Remote',
+    employmentType: null,
+    remote: null,
+    salary: null,
+    seniority: null,
+    description: '',
+    requirements: [],
+    responsibilities: [],
+    skills: ['React'],
+    sources: [],
+    status: 'DISCOVERED',
+    runId: null,
+    analysisId: null,
+    applicationId: null,
+    saved: false,
+    detailsComplete: true,
+    applyEmail: null,
+    contactName: null,
+    dedupKey: '',
+    createdAt: '',
+    updatedAt: '',
+    ...over,
+  };
+  return {
+    job: base,
+    analysis: analysis
+      ? {
+          id: 'a',
+          jobId: base.id,
+          userId: 'u',
+          relevant: true,
+          matchScore: 80,
+          matchedSkills: [],
+          missingSkills: [],
+          requiredExperienceMet: true,
+          seniorityMatch: true,
+          locationMatch: true,
+          employmentTypeMatch: true,
+          salaryAssessment: '',
+          requiredQualifications: [],
+          niceToHave: [],
+          concerns: [],
+          importantKeywords: [],
+          summary: '',
+          runId: null,
+          createdAt: '',
+          updatedAt: '',
+          ...analysis,
+        }
+      : null,
+    applicationStatus: null,
+  };
+}
+
+describe('job filters', () => {
+  const items = [
+    job({ id: '1', status: 'DISCOVERED' }),
+    job({ id: '2', status: 'READY_FOR_REVIEW' }, { relevant: true, matchScore: 90 }),
+    job({ id: '3', status: 'REJECTED' }, { relevant: true, matchScore: 70 }),
+    job(
+      { id: '4', status: 'MANUAL_ACTION_REQUIRED', company: 'Zed' },
+      { relevant: true, matchScore: 60 },
+    ),
+    job({ id: '5', status: 'NOT_RELEVANT', saved: true }, { relevant: false, matchScore: 20 }),
+  ];
+
+  it('filters by status buckets', () => {
+    expect(filterJobs(items, 'NEW').map((i) => i.job.id)).toEqual(['1']);
+    expect(filterJobs(items, 'AWAITING_APPROVAL').map((i) => i.job.id)).toEqual(['2']);
+    expect(filterJobs(items, 'RELEVANT').map((i) => i.job.id)).toEqual(['2', '4']);
+    expect(filterJobs(items, 'REJECTED').map((i) => i.job.id)).toEqual(['3', '5']);
+    expect(filterJobs(items, 'MANUAL_ACTION').map((i) => i.job.id)).toEqual(['4']);
+    expect(filterJobs(items, 'SAVED').map((i) => i.job.id)).toEqual(['5']);
+  });
+
+  it('applies a text query', () => {
+    expect(filterJobs(items, 'ALL', 'zed').map((i) => i.job.id)).toEqual(['4']);
+  });
+
+  it('sorts by match score then recency', () => {
+    expect(sortJobs(items).map((i) => i.job.id)).toEqual(['2', '3', '4', '5', '1']);
+  });
+});
+
+describe('location filter', () => {
+  const jobs = [
+    { location: 'Mumbai, Maharashtra, India', remote: null },
+    { location: 'Mumbai (Hybrid)', remote: 'HYBRID' },
+    { location: 'Bengaluru / Pune', remote: null },
+    { location: 'Remote - India', remote: 'REMOTE' },
+    { location: 'Pune', remote: 'Remote' },
+  ];
+
+  it('lists the places in the database with counts, most common first', () => {
+    const options = locationOptions(jobs);
+    expect(options.slice(0, 3)).toEqual([
+      { label: 'Mumbai', count: 2 },
+      { label: 'Pune', count: 2 },
+      { label: 'Remote', count: 2 },
+    ]);
+    expect(options.map((o) => o.label)).toContain('Bengaluru');
+    expect(options.map((o) => o.label)).not.toContain('India');
+    expect(options.map((o) => o.label)).not.toContain('Hybrid');
+  });
+
+  it("matches a typed place inside the job's location, and remote jobs for 'remote'", () => {
+    expect(jobs.filter((j) => matchesLocation(j, 'mumbai')).length).toBe(2);
+    expect(jobs.filter((j) => matchesLocation(j, 'Pune')).length).toBe(2);
+    expect(jobs.filter((j) => matchesLocation(j, 'remote')).length).toBe(2);
+    expect(jobs.filter((j) => matchesLocation(j, '')).length).toBe(5);
+    expect(jobs.filter((j) => matchesLocation(j, 'Delhi')).length).toBe(0);
+  });
+});
+
+describe('application state helpers', () => {
+  it('only allows approval from review and applying after approval', () => {
+    expect(applicationActions('READY_FOR_REVIEW').canApprove).toBe(true);
+    expect(applicationActions('READY_FOR_REVIEW').canApply).toBe(false);
+    expect(applicationActions('APPROVED').canApply).toBe(true);
+    expect(applicationActions('APPLIED').canReject).toBe(false);
+    expect(applicationActions('WAITING_FOR_USER').canAnswer).toBe(true);
+    expect(applicationActions('MANUAL_ACTION_REQUIRED').canMarkApplied).toBe(true);
+  });
+
+  it('collects pending actions', () => {
+    const mk = (status: ApplicationListItem['application']['status']): ApplicationListItem => ({
+      application: { status } as ApplicationListItem['application'],
+      job: job({}).job,
+      analysis: null,
+    });
+    expect(
+      pendingApplications([mk('APPLIED'), mk('READY_FOR_REVIEW'), mk('WAITING_FOR_USER')]).length,
+    ).toBe(2);
+  });
+
+  it('maps statuses to tones', () => {
+    expect(statusTone('APPLIED')).toBe('success');
+    expect(statusTone('MANUAL_ACTION_REQUIRED')).toBe('warning');
+    expect(statusTone('REJECTED')).toBe('danger');
+  });
+});
+
+describe('candidate profile', () => {
+  it('reports missing required fields', () => {
+    const profile = {
+      personal: {
+        name: '',
+        email: 'bad',
+        phone: '',
+        location: '',
+        linkedin: '',
+        github: '',
+        portfolio: '',
+        currentTitle: '',
+      },
+      preferences: { targetRoles: [] },
+      skills: {
+        frontend: [],
+        backend: [],
+        database: [],
+        devops: [],
+        cloud: [],
+        testing: [],
+        other: [],
+      },
+    } as unknown as CandidateProfile;
+    const issues = profileIssues(profile);
+    expect(issues).toContain('Add your name');
+    expect(issues).toContain('Email address looks invalid');
+    expect(issues).toContain('Add at least one target role');
+    expect(issues).toContain('Add your skills');
+  });
+
+  it('splits comma and newline lists without duplicates', () => {
+    expect(splitList('React, Node.js\nReact,, ')).toEqual(['React', 'Node.js']);
+  });
+});
+
+describe('guessSkillGroup', () => {
+  it('files the skills a job analysis typically reports as missing', () => {
+    const cases: [string, string][] = [
+      ['NextJS', 'frontend'],
+      ['Angular', 'frontend'],
+      ['MySQL', 'database'],
+      ['graph database', 'database'],
+      ['GraphQL', 'backend'],
+      ['Sockets', 'backend'],
+      ['Python', 'backend'],
+      ['AWS (Beanstalk, CloudWatch)', 'cloud'],
+      ['Docker', 'devops'],
+      ['Jest', 'testing'],
+      ['Agile', 'other'],
+      ['Scrum', 'other'],
+    ];
+    for (const [skill, group] of cases)
+      expect([skill, guessSkillGroup(skill)]).toEqual([skill, group]);
+  });
+});
+
+describe('isAgentRunning', () => {
+  it('treats a job-site profile update as running', () => {
+    expect(isAgentRunning('UPDATING_PROFILE')).toBe(true);
+    expect(isAgentRunning('COMPLETED')).toBe(false);
+  });
+});
+
+describe('normalizeQuestion', () => {
+  it('ignores case and punctuation', () => {
+    expect(normalizeQuestion('What is your  current annual CTC?')).toBe(
+      normalizeQuestion('what is your current annual ctc'),
+    );
+  });
+});
