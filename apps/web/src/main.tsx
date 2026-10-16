@@ -1,3 +1,8 @@
+import '@offerpath/ui/styles.css';
+import '@offerpath/learn/styles.css';
+import './web.css';
+import './monaco';
+
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 

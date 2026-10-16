@@ -1,0 +1,14 @@
+/* The web app's own few styles, on @offerpath/ui's tokens. */
+.auth-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  background: var(--bg);
+}
+.auth-card {
+  width: 100%;
+  max-width: 420px;
+  padding: 28px;
+}

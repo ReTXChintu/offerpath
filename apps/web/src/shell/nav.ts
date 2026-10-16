@@ -1,0 +1,68 @@
+import type { IconName } from '@offerpath/ui';
+
+export interface NavEntry {
+  path: string;
+  label: string;
+  icon: IconName;
+  /** Extra words the command palette matches. */
+  keywords?: string;
+}
+
+/** Plan section 5.3: the learning side in full, the hunt as a remote control. */
+export const TODAY: NavEntry = {
+  path: '/',
+  label: 'Today',
+  icon: 'home',
+  keywords: 'daily plan home',
+};
+
+export const GROW: NavEntry[] = [
+  { path: '/roadmap', label: 'Roadmap', icon: 'route', keywords: 'goal skill tree' },
+  { path: '/learn', label: 'Learn', icon: 'learn', keywords: 'concepts tutor technologies' },
+  { path: '/practice', label: 'Practice', icon: 'practice', keywords: 'exercises coding' },
+  { path: '/recall', label: 'Recall', icon: 'brain', keywords: 'review flashcards' },
+  { path: '/interviews', label: 'Interviews', icon: 'interview', keywords: 'mock' },
+];
+
+export const HUNT: NavEntry[] = [
+  { path: '/hunt', label: 'Needs you', icon: 'bell', keywords: 'approvals questions start stop' },
+  { path: '/applications', label: 'Applications', icon: 'send', keywords: 'approve review' },
+  { path: '/jobs', label: 'Jobs', icon: 'briefcase', keywords: 'search postings' },
+];
+
+export const PROGRESS: NavEntry = {
+  path: '/progress',
+  label: 'Progress',
+  icon: 'progress',
+  keywords: 'skills funnel coding score',
+};
+
+export const SETTINGS: NavEntry = {
+  path: '/settings',
+  label: 'Settings',
+  icon: 'settings',
+  keywords: 'account devices downloads goal models',
+};
+
+/** Pages that belong to a sidebar entry without sharing its path. */
+const ALSO: Record<string, string[]> = {
+  '/learn': ['/concept'],
+  '/practice': ['/exercise', '/project', '/challenge'],
+};
+
+/** Whether a sidebar entry is the current page (sub-pages count: /jobs/42 → Jobs). */
+export function isActive(entryPath: string, current: string): boolean {
+  if (entryPath === '/') return current === '/';
+  return [entryPath, ...(ALSO[entryPath] ?? [])].some(
+    (p) => current === p || current.startsWith(`${p}/`),
+  );
+}
+
+/** Pages that own the whole content area: editors, the terminal, a live interview, onboarding. */
+export function isFullBleed(path: string): boolean {
+  return (
+    /^\/(exercise|project|challenge)\/[^/]+$/.test(path) ||
+    /^\/interviews\/[^/]+$/.test(path) ||
+    path === '/onboarding'
+  );
+}

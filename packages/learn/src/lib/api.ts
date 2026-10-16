@@ -12,7 +12,11 @@ import type { ProblemDetails } from '@offerpath/types';
  */
 
 export class ApiError extends Error {
-  constructor(public readonly problem: ProblemDetails) {
+  constructor(
+    public readonly problem: ProblemDetails,
+    /** The response body as it came, when it was not problem details (e.g. the desktop relay's `{ error }`). */
+    public readonly body: unknown = null,
+  ) {
     super(problem.detail ?? problem.title);
     this.name = 'ApiError';
   }
@@ -136,6 +140,7 @@ export function createFetchClient(options: FetchClientOptions): LearnClient {
               title: 'Request failed',
               status: response.status,
             },
+        payload,
       );
     }
 
