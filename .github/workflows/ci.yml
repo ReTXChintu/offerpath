@@ -51,13 +51,15 @@ jobs:
       - run: node scripts/sync-versions.mjs --check
       - run: pnpm format:check
       - name: Migrations match the schema
-        # Catches a schema edit committed without its migration. Uses the empty
-        # database as its shadow, so it runs before anything is applied.
+        # Catches a schema edit committed without its migration. Prisma replays
+        # the migrations into a throwaway shadow database of its own.
         run: |
+          PGPASSWORD=offerpath psql -h localhost -U offerpath -d offerpath_test \
+            -c 'CREATE DATABASE offerpath_shadow'
           pnpm --filter @offerpath/database exec prisma migrate diff \
             --from-migrations prisma/migrations \
             --to-schema-datamodel prisma/schema.prisma \
-            --shadow-database-url "$DATABASE_URL" \
+            --shadow-database-url "postgresql://offerpath:offerpath@localhost:5432/offerpath_shadow" \
             --exit-code && echo "Schema and migrations agree"
       - name: Apply migrations
         run: pnpm --filter @offerpath/database exec prisma migrate deploy
