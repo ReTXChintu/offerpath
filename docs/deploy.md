@@ -74,7 +74,9 @@ New app ids mean a new Firebase app, a new keystore and a new updater key: Job H
 
 ## 4. Cutover from Job Hunter and ForgeRoutine
 
-Done in this order, so the old apps keep running until the last step. Steps 1 and 2 have been rehearsed (2026-10-16).
+Done in this order, so the old apps keep running until the last step.
+
+**Steps 1-3 were done on 2026-10-16.** Offerpath runs from `/opt/var/offerpath` as `offerpath-api` (50005), `offerpath-web` (50004) and `offerpath-sandbox` (Redis queue); Job Hunter's and ForgeRoutine's PM2 processes were deleted, their folders in `/opt/var` are still there. Steps 4 and 5 are left.
 
 1. **Data, one last time.** Job Hunter keeps writing to MongoDB until now, so on a machine with all three repos:
    ```bash
