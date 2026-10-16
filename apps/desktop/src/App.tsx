@@ -1,22 +1,65 @@
-import { invoke } from '@tauri-apps/api/core';
-import { useEffect, useState } from 'react';
+import {
+  HuntEvents,
+  HuntProvider,
+  defaultHuntPath,
+  type HuntClient,
+  type HuntNavigator,
+} from '@offerpath/hunt';
+import { UiProvider } from '@offerpath/ui';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { RouterProvider, type RouterHistory } from '@tanstack/react-router';
+import { useMemo, useState } from 'react';
 
-export function App() {
-  const [version, setVersion] = useState<string>();
+import { NotInTauri } from './pages/Placeholders';
+import { createAppRouter } from './router';
+import { isTauri, tauriClient } from './tauri';
 
-  useEffect(() => {
-    invoke<string>('app_version')
-      .then(setVersion)
-      .catch(() => setVersion(undefined));
-  }, []);
+/**
+ * The desktop app. `client` and `history` default to Tauri and hash
+ * history; tests pass a fake client and a memory history.
+ */
+export function App({
+  client = tauriClient,
+  history,
+  requireTauri = true,
+}: {
+  client?: HuntClient;
+  history?: RouterHistory;
+  requireTauri?: boolean;
+}) {
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: { staleTime: 5_000, retry: 1, refetchOnWindowFocus: false },
+        },
+      }),
+  );
+  const [router] = useState(() => createAppRouter(history));
+  const navigator = useMemo<HuntNavigator>(
+    () => ({
+      href: (target) => `#${defaultHuntPath(target)}`,
+      navigate: (target) => router.history.push(defaultHuntPath(target)),
+    }),
+    [router],
+  );
+
+  if (requireTauri && !isTauri()) {
+    return (
+      <UiProvider>
+        <NotInTauri />
+      </UiProvider>
+    );
+  }
 
   return (
-    <main
-      style={{ fontFamily: 'system-ui, sans-serif', padding: '3rem 1rem', textAlign: 'center' }}
-    >
-      <h1>Offerpath</h1>
-      <p>Your desktop runs your AI and your job hunt. Keep it on.</p>
-      {version && <p style={{ opacity: 0.6 }}>Version {version}</p>}
-    </main>
+    <UiProvider>
+      <QueryClientProvider client={queryClient}>
+        <HuntProvider client={client} navigator={navigator}>
+          <HuntEvents />
+          <RouterProvider router={router} />
+        </HuntProvider>
+      </QueryClientProvider>
+    </UiProvider>
   );
 }
