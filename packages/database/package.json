@@ -28,7 +28,8 @@
     "lint": "eslint src",
     "test": "vitest run --passWithNoTests",
     "import:job-hunter": "dotenv -e ../../.env -- tsx src/import/job-hunter.ts",
-    "seed": "dotenv -e ../../.env -- tsx prisma/seed.ts"
+    "seed": "dotenv -e ../../.env -- tsx prisma/seed.ts",
+    "import:forge-routine": "dotenv -e ../../.env -- tsx src/import/forge-routine.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.2.1"

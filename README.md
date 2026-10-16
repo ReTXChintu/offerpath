@@ -42,6 +42,10 @@ pnpm --filter @offerpath/api test:e2e   # API end to end, against TEST_DATABASE_
 
 `pnpm db:import:job-hunter [--dry-run]` copies Job Hunter's accounts and synced documents from MongoDB into `users` and `sync_documents`. It reads `JOB_HUNTER_MONGODB_URI` and `JOB_HUNTER_MONGODB_DATABASE` from the environment, plus `FORGEROUTINE_DATABASE_URL` (optional) so that accounts that also exist in ForgeRoutine keep their ForgeRoutine id. Pass them for the one command; they don't belong in Offerpath's `.env`. It's safe to run again, and it should be run once more just before the cutover (docs/plan.md, section 9).
 
+## Moving ForgeRoutine's data
+
+`pnpm db:import:forge-routine [--dry-run]` copies ForgeRoutine's database into Offerpath's, table by table, with `FORGEROUTINE_DATABASE_URL` passed for the one command. Users keep their ids (an account the Job Hunter import already matched is the same row); vendor keys, agent pairings and `@*.test` accounts are left behind. Re-runnable; rehearsed 2026-10-16 into a scratch database after the Job Hunter import (2,068 rows, 38 tables).
+
 ## Releasing
 
 One version for the whole repo. `pnpm release` (or `release:patch|minor|major`) bumps the root `package.json`, and `scripts/sync-versions.mjs` stamps the same version into every `package.json`, `tauri.conf.json`, `Cargo.toml`, `Cargo.lock` and `pubspec.yaml`, then commits, tags `vX.Y.Z` and pushes. The tag runs `.github/workflows/release.yml`, which builds the Windows installer and the APK and publishes a GitHub Release. It needs the `OFFERPATH_SERVER_URL` repository secret, e.g. `http://<server-ip>:50005`.
