@@ -219,6 +219,7 @@ pub fn run() {
             commands::backend_login,
             commands::backend_logout,
             commands::get_sync_status,
+            commands::learn_api_request,
             commands::get_candidate_profile,
             commands::save_candidate_profile,
             commands::list_experiences,

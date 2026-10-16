@@ -176,6 +176,25 @@ impl SyncWorker {
         Ok(())
     }
 
+    /// Calls the API as this desktop (its device token), for the learning
+    /// pages. A longer timeout than sync's: an AI answer waits for Claude.
+    pub async fn api_request(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&serde_json::Value>,
+        idempotency_key: Option<&str>,
+    ) -> CoreResult<backend::ApiReply> {
+        let client = self.client().await?;
+        let http = reqwest::Client::builder()
+            .timeout(Duration::from_secs(300))
+            .build()
+            .unwrap_or_default();
+        client
+            .request(&http, method, path, body, idempotency_key)
+            .await
+    }
+
     async fn publish(&self) {
         let s = self.status().await;
         let _ = self.status_tx.send(s);
