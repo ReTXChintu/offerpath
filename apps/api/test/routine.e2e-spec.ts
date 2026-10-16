@@ -1,6 +1,8 @@
 import { type INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { loadConfig } from '@offerpath/config';
 import { PrismaClient } from '@offerpath/database';
+import { learningDate } from '@offerpath/shared';
 import request from 'supertest';
 
 import { AppModule } from '../src/app.module.js';
@@ -194,9 +196,11 @@ describe("today's routine", () => {
     // Backdate today's routine so the next plan sees it as yesterday's,
     // then leave one item unfinished and replan.
     const account = await prisma.user.findUnique({ where: { email: user.email } });
-    const yesterday = new Date();
-    yesterday.setHours(0, 0, 0, 0);
-    yesterday.setDate(yesterday.getDate() - 1);
+    // The learning day before today, in the app's zone. Not the calendar day:
+    // the learning day turns over at 06:00, so before then calendar yesterday
+    // is still today.
+    const today = learningDate(new Date(), loadConfig().env.APP_TIMEZONE);
+    const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
 
     const todays = await prisma.routine.findFirst({
       where: { userId: account!.id },
