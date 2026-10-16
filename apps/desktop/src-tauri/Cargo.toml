@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Offerpath desktop application (Tauri shell)"
+description = "Offerpath desktop application (Tauri shell + agent runtime)"
 default-run = "offerpath-desktop"
 
 [lib]
@@ -21,6 +21,15 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 offerpath-core = { path = "../../../crates/offerpath-core" }
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-notification = "2.3"
+tauri-plugin-single-instance = "2"
 serde.workspace = true
+chrono.workspace = true
 serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+dotenvy = "0.15"

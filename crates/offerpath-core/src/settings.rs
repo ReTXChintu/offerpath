@@ -1,0 +1,567 @@
+use std::path::Path;
+
+use serde::{Deserialize, Serialize};
+
+use crate::error::CoreResult;
+
+/// Non-secret application settings, persisted as JSON in the app data dir.
+/// Secrets (device tokens) never live here; see `secrets`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AppSettings {
+    #[serde(default = "default_sources")]
+    pub job_sources: Vec<JobSourceConfig>,
+    #[serde(default = "default_max_jobs_per_source")]
+    pub max_jobs_per_source: u32,
+    #[serde(default = "default_max_applications_per_run")]
+    pub max_applications_per_run: u32,
+    /// Only `REVIEW_REQUIRED` is implemented on purpose: the agent never
+    /// submits without explicit approval.
+    #[serde(default)]
+    pub approval_mode: ApprovalMode,
+    /// Jobs older than this are skipped during discovery.
+    #[serde(default = "default_recency_days")]
+    pub recency_days: u32,
+    #[serde(default)]
+    pub resume: ResumeSettings,
+    #[serde(default)]
+    pub browser: BrowserSettings,
+    #[serde(default)]
+    pub claude: ClaudeSettings,
+    #[serde(default)]
+    pub mock_mode: bool,
+    #[serde(default)]
+    pub setup_completed: bool,
+    #[serde(default)]
+    pub minimum_match_score: u8,
+    #[serde(default)]
+    pub remote: RemoteSettings,
+    #[serde(default)]
+    pub backend: BackendSettings,
+    /// Check Gmail (inbox and spam) for employers' replies this often, in
+    /// hours, while the agent is idle. 0 turns it off.
+    #[serde(default = "default_inbox_check_hours")]
+    pub inbox_check_hours: u32,
+    /// When job-site profiles that fell behind the desktop profile are
+    /// updated without the user clicking Update.
+    #[serde(default)]
+    pub profile_sync: ProfileSyncSettings,
+    /// Telegram channels and groups to scan for job posts (`@name` or a
+    /// `t.me/...` link), read in Telegram Web by the "Telegram" source.
+    #[serde(default)]
+    pub telegram_channels: Vec<String>,
+    /// Companies whose own careers sites the "Company careers" source
+    /// searches, one Claude run each.
+    #[serde(default = "default_target_companies")]
+    pub target_companies: Vec<TargetCompany>,
+}
+
+/// A company whose careers site is searched directly.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TargetCompany {
+    pub name: String,
+    /// The careers site's job search page. If it moved, Claude finds the
+    /// official one from the company's homepage.
+    pub careers_url: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+/// The name the "Company careers" source goes by.
+pub const COMPANY_CAREERS: &str = "Company careers";
+
+/// Well-known employers, the first few on. Each enabled one is a separate
+/// Claude run per hunt, so the rest start off.
+pub const DEFAULT_COMPANIES: &[(&str, &str, bool)] = &[
+    (
+        "Google",
+        "https://www.google.com/about/careers/applications/jobs/results/",
+        true,
+    ),
+    (
+        "Microsoft",
+        "https://jobs.careers.microsoft.com/global/en/search",
+        true,
+    ),
+    ("Apple", "https://jobs.apple.com/en-in/search", true),
+    ("Amazon", "https://www.amazon.jobs/en/search", true),
+    ("Meta", "https://www.metacareers.com/jobs", true),
+    (
+        "Accenture",
+        "https://www.accenture.com/in-en/careers/jobsearch",
+        true,
+    ),
+    (
+        "Deloitte",
+        "https://www.deloitte.com/global/en/careers.html",
+        true,
+    ),
+    ("IBM", "https://www.ibm.com/careers/search", false),
+    (
+        "Adobe",
+        "https://careers.adobe.com/us/en/search-results",
+        false,
+    ),
+    (
+        "Salesforce",
+        "https://careers.salesforce.com/en/jobs/",
+        false,
+    ),
+    ("Oracle", "https://careers.oracle.com/jobs/", false),
+    (
+        "Atlassian",
+        "https://www.atlassian.com/company/careers/all-jobs",
+        false,
+    ),
+    ("Infosys", "https://career.infosys.com/joblist", false),
+    ("TCS", "https://ibegin.tcs.com/iBegin/jobs/search", false),
+    (
+        "Wipro",
+        "https://careers.wipro.com/careers-home/jobs",
+        false,
+    ),
+    (
+        "Capgemini",
+        "https://www.capgemini.com/in-en/careers/join-capgemini/job-search/",
+        false,
+    ),
+    (
+        "Flipkart",
+        "https://www.flipkartcareers.com/#!/joblist",
+        false,
+    ),
+];
+
+fn default_target_companies() -> Vec<TargetCompany> {
+    DEFAULT_COMPANIES
+        .iter()
+        .map(|(name, url, enabled)| TargetCompany {
+            name: name.to_string(),
+            careers_url: url.to_string(),
+            enabled: *enabled,
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ProfileSyncMode {
+    /// Overnight, from `nightly_hour`, so it never gets in the way of
+    /// applications during the day.
+    #[default]
+    Nightly,
+    /// Notify, and wait for "Update all now".
+    Ask,
+    /// As soon as the profile changes and the agent is free.
+    Immediate,
+    /// Never automatically.
+    Off,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileSyncSettings {
+    #[serde(default)]
+    pub mode: ProfileSyncMode,
+    /// Local hour (0-23) nightly updates may start; they start only in the
+    /// six hours after it.
+    #[serde(default)]
+    pub nightly_hour: u8,
+}
+
+impl Default for ProfileSyncSettings {
+    fn default() -> Self {
+        Self {
+            mode: ProfileSyncMode::Nightly,
+            nightly_hour: 0,
+        }
+    }
+}
+
+impl ProfileSyncSettings {
+    /// Hours after `nightly_hour` during which nightly updates may start.
+    pub const NIGHT_WINDOW_HOURS: u8 = 6;
+
+    pub fn in_night_window(&self, local_hour: u8) -> bool {
+        let start = self.nightly_hour % 24;
+        (local_hour + 24 - start) % 24 < Self::NIGHT_WINDOW_HOURS
+    }
+}
+
+fn default_inbox_check_hours() -> u32 {
+    3
+}
+
+/// Non-secret configuration for the mobile companion app connection. The
+/// device token issued by the relay lives in the OS credential store (see
+/// `secrets::REMOTE_DEVICE_TOKEN_KEY`), never here.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteSettings {
+    /// Base URL of a self-hosted Offerpath server instance, e.g.
+    /// `https://relay.example.com`. Empty means the mobile companion app is
+    /// not configured.
+    #[serde(default)]
+    pub relay_url: String,
+    /// Display-only: the signed-in account's email, shown in Settings.
+    #[serde(default)]
+    pub account_email: String,
+    /// This desktop's own device id on the relay, once registered.
+    #[serde(default)]
+    pub device_id: Option<String>,
+    /// Name this desktop registered itself under (shown in the phone's
+    /// presence banner and this desktop's own device list).
+    #[serde(default = "default_device_name")]
+    pub device_name: String,
+}
+
+impl Default for RemoteSettings {
+    fn default() -> Self {
+        Self {
+            relay_url: String::new(),
+            account_email: String::new(),
+            device_id: None,
+            device_name: default_device_name(),
+        }
+    }
+}
+
+/// Non-secret configuration for the self-hosted `@offerpath/backend`
+/// connection (see `apps/backend`, `docs/backend.md`). This desktop's own
+/// device token lives in the OS credential store (see
+/// `secrets::BACKEND_DEVICE_TOKEN_KEY`), never here. Empty `backend_url`
+/// means the desktop has not signed in and keeps working entirely
+/// local-first, exactly as before this existed.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BackendSettings {
+    #[serde(default)]
+    pub backend_url: String,
+    /// Display-only: the signed-in account's email, shown in Settings.
+    #[serde(default)]
+    pub account_email: String,
+    /// This desktop's own device id on the backend, once registered.
+    #[serde(default)]
+    pub device_id: Option<String>,
+    /// Name this desktop registered itself under.
+    #[serde(default = "default_device_name")]
+    pub device_name: String,
+}
+
+impl Default for BackendSettings {
+    fn default() -> Self {
+        Self {
+            backend_url: String::new(),
+            account_email: String::new(),
+            device_id: None,
+            device_name: default_device_name(),
+        }
+    }
+}
+
+fn default_device_name() -> String {
+    hostname_or_default()
+}
+
+fn hostname_or_default() -> String {
+    std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_else(|_| "My Computer".into())
+}
+
+fn default_max_jobs_per_source() -> u32 {
+    10
+}
+fn default_max_applications_per_run() -> u32 {
+    10
+}
+fn default_recency_days() -> u32 {
+    7
+}
+/// Every job source the discovery skill knows, and whether it starts
+/// enabled: on a new install, and when an update adds it to existing
+/// settings.
+pub const KNOWN_SOURCES: &[(&str, bool)] = &[
+    ("LinkedIn", true),
+    ("Naukri", true),
+    ("LinkedIn Posts", true),
+    ("Cutshort", true),
+    ("Indeed", false),
+    ("Wellfound", false),
+    ("Instahyre", false),
+    ("Hirist", false),
+    ("Foundit", false),
+    ("Hiring Cafe", true),
+    ("Welcome to the Jungle", true),
+    ("Himalayas", true),
+    ("Y Combinator", true),
+    // Does nothing until channels are added in Settings.
+    ("Telegram", true),
+    // The careers sites in `target_companies`.
+    (COMPANY_CAREERS, true),
+];
+
+fn default_sources() -> Vec<JobSourceConfig> {
+    KNOWN_SOURCES
+        .iter()
+        .map(|(p, enabled)| JobSourceConfig {
+            platform: p.to_string(),
+            enabled: *enabled,
+        })
+        .collect()
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            job_sources: default_sources(),
+            max_jobs_per_source: default_max_jobs_per_source(),
+            max_applications_per_run: default_max_applications_per_run(),
+            approval_mode: ApprovalMode::ReviewRequired,
+            recency_days: default_recency_days(),
+            resume: ResumeSettings::default(),
+            browser: BrowserSettings::default(),
+            claude: ClaudeSettings::default(),
+            mock_mode: false,
+            setup_completed: false,
+            minimum_match_score: 60,
+            remote: RemoteSettings::default(),
+            backend: BackendSettings::default(),
+            inbox_check_hours: default_inbox_check_hours(),
+            profile_sync: ProfileSyncSettings::default(),
+            telegram_channels: vec![],
+            target_companies: default_target_companies(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ApprovalMode {
+    #[default]
+    ReviewRequired,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct JobSourceConfig {
+    pub platform: String,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ResumeSettings {
+    #[serde(default = "default_true")]
+    pub generate_cover_letter: bool,
+    #[serde(default = "default_ats_iterations")]
+    pub ats_max_iterations: u8,
+    #[serde(default = "default_min_coverage")]
+    pub minimum_keyword_coverage: u8,
+    #[serde(default = "default_true")]
+    pub generate_pdf: bool,
+    #[serde(default = "default_true")]
+    pub generate_docx: bool,
+    /// Delete an application's generated files (PDF, DOCX, HTML, ...) once
+    /// it's applied. The content stays, so they can be re-created any time.
+    #[serde(default = "default_true")]
+    pub delete_files_after_applied: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+fn default_ats_iterations() -> u8 {
+    3
+}
+fn default_min_coverage() -> u8 {
+    70
+}
+
+impl Default for ResumeSettings {
+    fn default() -> Self {
+        Self {
+            generate_cover_letter: true,
+            ats_max_iterations: 3,
+            minimum_keyword_coverage: 70,
+            generate_pdf: true,
+            generate_docx: true,
+            delete_files_after_applied: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserSettings {
+    /// Optional explicit path to the Chrome executable.
+    #[serde(default)]
+    pub chrome_path: Option<String>,
+    #[serde(default)]
+    pub keep_tabs_open: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaudeSettings {
+    /// Optional explicit path to the Claude CLI executable.
+    #[serde(default)]
+    pub cli_path: Option<String>,
+    /// Model alias passed to `claude --model` (empty = CLI default).
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Passed to `--max-budget-usd` per Claude invocation. 0 disables.
+    #[serde(default = "default_budget")]
+    pub max_budget_usd_per_call: f64,
+    #[serde(default = "default_max_turns")]
+    pub max_turns_browser: u32,
+    /// Stop a Claude run that has produced no output for this long. Runs
+    /// that keep working are not cut off (see `ClaudeRequest::max_duration`).
+    #[serde(default = "default_timeout")]
+    pub timeout_seconds: u64,
+}
+
+fn default_budget() -> f64 {
+    3.0
+}
+fn default_max_turns() -> u32 {
+    80
+}
+fn default_timeout() -> u64 {
+    900
+}
+
+impl Default for ClaudeSettings {
+    fn default() -> Self {
+        Self {
+            cli_path: None,
+            model: None,
+            max_budget_usd_per_call: default_budget(),
+            max_turns_browser: default_max_turns(),
+            timeout_seconds: default_timeout(),
+        }
+    }
+}
+
+impl AppSettings {
+    pub fn load(path: &Path) -> CoreResult<Self> {
+        if !path.exists() {
+            let mut s = Self::default();
+            s.apply_env();
+            return Ok(s);
+        }
+        let raw = std::fs::read_to_string(path)?;
+        let mut s: AppSettings = serde_json::from_str(&raw).unwrap_or_default();
+        s.add_new_sources();
+        s.apply_env();
+        Ok(s)
+    }
+
+    pub fn save(&self, path: &Path) -> CoreResult<()> {
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, serde_json::to_string_pretty(self)?)?;
+        std::fs::rename(&tmp, path)?;
+        Ok(())
+    }
+
+    /// Environment variables override persisted settings (useful in dev).
+    fn apply_env(&mut self) {
+        if let Ok(v) = std::env::var("MOCK_MODE") {
+            self.mock_mode = matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes");
+        }
+        if let Ok(v) = std::env::var("CLAUDE_CLI_PATH") {
+            if !v.trim().is_empty() {
+                self.claude.cli_path = Some(v);
+            }
+        }
+        if let Ok(v) = std::env::var("CHROME_PATH") {
+            if !v.trim().is_empty() {
+                self.browser.chrome_path = Some(v);
+            }
+        }
+    }
+
+    /// Sources added in a later version show up in existing settings too,
+    /// without touching the user's choices for the ones already there.
+    fn add_new_sources(&mut self) {
+        for (platform, enabled) in KNOWN_SOURCES {
+            if !self
+                .job_sources
+                .iter()
+                .any(|s| s.platform.eq_ignore_ascii_case(platform))
+            {
+                self.job_sources.push(JobSourceConfig {
+                    platform: platform.to_string(),
+                    enabled: *enabled,
+                });
+            }
+        }
+    }
+
+    pub fn enabled_sources(&self) -> Vec<String> {
+        self.job_sources
+            .iter()
+            .filter(|s| s.enabled)
+            .map(|s| s.platform.clone())
+            .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn defaults_are_conservative() {
+        let s = AppSettings::default();
+        assert_eq!(s.approval_mode, ApprovalMode::ReviewRequired);
+        assert!(!s.mock_mode);
+        assert_eq!(s.resume.ats_max_iterations, 3);
+        assert!(s.enabled_sources().contains(&"LinkedIn".to_string()));
+    }
+
+    #[test]
+    fn round_trips_through_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let s = AppSettings {
+            max_jobs_per_source: 3,
+            ..Default::default()
+        };
+        s.save(&path).unwrap();
+        let loaded = AppSettings::load(&path).unwrap();
+        assert_eq!(loaded.max_jobs_per_source, 3);
+    }
+
+    #[test]
+    fn new_sources_join_existing_settings_without_changing_old_choices() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(
+            &path,
+            r#"{"jobSources":[{"platform":"LinkedIn","enabled":false},{"platform":"Naukri","enabled":true}]}"#,
+        )
+        .unwrap();
+        let s = AppSettings::load(&path).unwrap();
+        let enabled = |p: &str| {
+            s.job_sources
+                .iter()
+                .find(|x| x.platform == p)
+                .map(|x| x.enabled)
+        };
+        assert_eq!(enabled("LinkedIn"), Some(false), "the user's choice stays");
+        assert_eq!(enabled("LinkedIn Posts"), Some(true));
+        assert_eq!(enabled("Cutshort"), Some(true));
+        assert_eq!(enabled("Foundit"), Some(false));
+        assert_eq!(s.job_sources.len(), KNOWN_SOURCES.len());
+    }
+
+    #[test]
+    fn unknown_fields_and_missing_fields_are_tolerated() {
+        let s: AppSettings =
+            serde_json::from_str(r#"{"maxJobsPerSource": 4, "future": 1}"#).unwrap();
+        assert_eq!(s.max_jobs_per_source, 4);
+        assert_eq!(s.recency_days, 7);
+    }
+}

@@ -1,23 +1,33 @@
 //! Offerpath core.
 //!
-//! Phase 2 moves `job-hunter-core` in here: the hunt pipeline, the Claude CLI
-//! runner, the local store, sync, approval gating, and the executor for
-//! learning AI jobs. Until then it only knows its own name and version.
+//! Everything that is not UI lives here: the domain model, local-first
+//! persistence with MongoDB Atlas synchronisation, Claude CLI process
+//! integration, Chrome discovery, document import/rendering, the agent state
+//! machine and the orchestrator that runs a job hunt end to end.
+//!
+//! The crate deliberately has no dependency on Tauri so that it can be unit
+//! tested with plain `cargo test`.
 
-/// Product name, shown in logs and the desktop window title.
-pub const PRODUCT_NAME: &str = "Offerpath";
+pub mod agent;
+pub mod backend_url;
+pub mod chrome;
+pub mod claude;
+pub mod context;
+pub mod dedup;
+pub mod documents;
+pub mod domain;
+pub mod error;
+pub mod learning;
+pub mod legacy;
+pub mod logging;
+pub mod paths;
+pub mod prompts;
+pub mod remote;
+pub mod secrets;
+pub mod settings;
+pub mod store;
+pub mod updates;
+pub mod util;
 
-/// The repo-wide version (`pnpm release` stamps it into the workspace Cargo.toml).
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn version_is_semver() {
-        let parts: Vec<&str> = VERSION.split('.').collect();
-        assert_eq!(parts.len(), 3, "expected x.y.z, got {VERSION}");
-        assert!(parts.iter().all(|p| p.parse::<u32>().is_ok()));
-    }
-}
+pub use context::AppContext;
+pub use error::{CoreError, CoreResult};
