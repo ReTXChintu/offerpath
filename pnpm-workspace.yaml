@@ -10,5 +10,7 @@ allowBuilds:
   '@prisma/engines': true
   '@nestjs/core': true
   unrs-resolver: true
+  # bullmq's optional native msgpack speed-up.
+  msgpackr-extract: true
   # Analytics postinstall only; nothing needs it to build.
   '@scarf/scarf': false
