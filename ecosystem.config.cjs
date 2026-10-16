@@ -71,10 +71,16 @@ module.exports = {
       name: 'offerpath-sandbox',
       cwd: resolve(ROOT, 'apps/sandbox'),
       script: 'dist/main.js',
+      // The code-execution worker for EXECUTION_DRIVER=queue (it needs Redis).
+      // Fork, one instance: it spawns child processes of its own.
       instances: 1,
       exec_mode: 'fork',
-      // Until phase 1 ports the worker, the placeholder exits after one log line.
-      autorestart: false,
+      autorestart: true,
+      max_restarts: 10,
+      restart_delay: 3000,
+      // Long enough to finish the run it holds and kill its child processes.
+      kill_timeout: 20_000,
+      max_memory_restart: '512M',
       time: true,
       env: { NODE_ENV: 'production' },
     },
