@@ -13,6 +13,9 @@ class LearningController extends ChangeNotifier {
   }
 
   Routine? routine;
+  /// The rest of the day's plan (goal, streak, interview prep), when the server has it.
+  TodayPlan? plan;
+  bool starting = false;
   int recallDue = 0;
   bool loading = false;
   bool loadedOnce = false;
@@ -21,6 +24,7 @@ class LearningController extends ChangeNotifier {
   void _onAuth() {
     if (auth.status != AuthStatus.signedIn && (routine != null || loadedOnce)) {
       routine = null;
+      plan = null;
       recallDue = 0;
       loadedOnce = false;
       error = null;
@@ -37,7 +41,11 @@ class LearningController extends ChangeNotifier {
     loading = true;
     notifyListeners();
     try {
-      final json = await api.get('/routines/today');
+      // The daily plan carries today's routine with the goal and the streak.
+      final today = await api.get('/today');
+      final map = today is Map ? today.cast<String, dynamic>() : const <String, dynamic>{};
+      plan = map.isEmpty ? null : TodayPlan.fromJson(map);
+      final json = map['learning'];
       routine = json is Map && json.isNotEmpty ? Routine.fromJson(json.cast<String, dynamic>()) : null;
       if (routine != null) {
         recallDue = routine!.recallDue;
@@ -51,6 +59,24 @@ class LearningController extends ChangeNotifier {
     } finally {
       loading = false;
       loadedOnce = true;
+      notifyListeners();
+    }
+  }
+
+  /// "Start my day".
+  Future<void> startDay() async {
+    final api = auth.api;
+    if (api == null || starting) return;
+    starting = true;
+    notifyListeners();
+    try {
+      final map = await api.post('/today/start');
+      if (map is Map) plan = TodayPlan.fromJson(map.cast<String, dynamic>());
+      error = null;
+    } catch (e) {
+      error = learnErrorMessage(e);
+    } finally {
+      starting = false;
       notifyListeners();
     }
   }

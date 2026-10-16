@@ -234,9 +234,42 @@ class _TodayLearningState extends State<_TodayLearning> {
       title = 'Nothing planned yet';
       subtitle = learning.recallDue > 0 ? '${learning.recallDue} due for review · plan today in Learn' : 'Plan today in Learn';
     }
+    final plan = learning.plan;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (plan != null) ...[
+          SectionHeader('Your day'),
+          AppCard(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(
+                [
+                  plan.streak == 1 ? '1 day streak' : '${plan.streak} day streak',
+                  if (plan.goalRoles.isNotEmpty) 'Goal: ${plan.goalRoles.first}',
+                  if (plan.goalDaysLeft != null) '${plan.goalDaysLeft} days left',
+                ].join(' · '),
+                style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+              ),
+              for (final prep in plan.prep)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    'Interview at ${prep.company} in ${prep.daysLeft} ${prep.daysLeft == 1 ? 'day' : 'days'}'
+                    '${prep.technologies.isEmpty ? '' : ': practise ${prep.technologies.join(', ')}'}',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ),
+              if (plan.startedAt == null) ...[
+                const SizedBox(height: 10),
+                FilledButton(
+                  onPressed: learning.starting ? null : () => learning.startDay(),
+                  child: Text(learning.starting ? 'Starting…' : 'Start my day'),
+                ),
+              ],
+            ]),
+          ),
+        ],
         SectionHeader('Learn today', action: TextButton(onPressed: () => nav.openLearn(), child: const Text('Open'))),
         AppCard(
           onTap: () => nav.openLearn(routine == null && learning.recallDue > 0 ? learnRecall : learnRoutine),

@@ -627,3 +627,58 @@ List<ReadingItem> readingListFromRoadmap(Object? roadmap) {
   }
   return out;
 }
+
+/// The day as `GET /today` plans it: the goal, the streak and whether the
+/// day was started. The routine and the hunt have their own models.
+class TodayPlan {
+  const TodayPlan({
+    required this.startedAt,
+    required this.streak,
+    required this.goalRoles,
+    required this.goalDaysLeft,
+    required this.prep,
+    required this.skillGaps,
+  });
+
+  factory TodayPlan.fromJson(Map<String, dynamic> json) {
+    final goal = json['goal'] as Map<String, dynamic>?;
+    return TodayPlan(
+      startedAt: json['startedAt'] == null ? null : DateTime.parse(json['startedAt'] as String),
+      streak: json['streak'] as int? ?? 0,
+      goalRoles: (goal?['targetRoles'] as List<dynamic>? ?? <dynamic>[]).cast<String>(),
+      goalDaysLeft: goal?['daysLeft'] as int?,
+      prep: (json['interviews'] as List<dynamic>? ?? <dynamic>[])
+          .map((dynamic e) => InterviewPrep.fromJson(e as Map<String, dynamic>))
+          .toList(),
+      skillGaps: (json['skillGaps'] as List<dynamic>? ?? <dynamic>[])
+          .map((dynamic e) => (e as Map<String, dynamic>)['skill'] as String)
+          .toList(),
+    );
+  }
+
+  final DateTime? startedAt;
+  final int streak;
+  final List<String> goalRoles;
+  final int? goalDaysLeft;
+  final List<InterviewPrep> prep;
+  final List<String> skillGaps;
+}
+
+/// An interview in the next two weeks, with what to practise for it.
+class InterviewPrep {
+  const InterviewPrep({required this.company, required this.title, required this.daysLeft, required this.technologies});
+
+  factory InterviewPrep.fromJson(Map<String, dynamic> json) => InterviewPrep(
+        company: json['company'] as String? ?? '',
+        title: json['title'] as String? ?? '',
+        daysLeft: json['daysLeft'] as int? ?? 0,
+        technologies: (json['technologies'] as List<dynamic>? ?? <dynamic>[])
+            .map((dynamic t) => (t as Map<String, dynamic>)['name'] as String)
+            .toList(),
+      );
+
+  final String company;
+  final String title;
+  final int daysLeft;
+  final List<String> technologies;
+}
