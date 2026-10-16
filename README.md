@@ -16,6 +16,7 @@ Status: phase 1 (API) done: ForgeRoutine's API and learning packages, plus Job H
 | `crates/offerpath-core`                                    | Rust core (placeholder until phase 2)                                                                                    |
 | `packages/ui`                                              | Design system for web and desktop: tokens, light/dark themes, components on Radix UI; one stylesheet                     |
 | `packages/hunt`                                            | Job Hunter's hunt pages and components on `packages/ui`, over an injected client (Tauri on the desktop)                  |
+| `packages/learn`                                           | ForgeRoutine's learning pages and Today on `packages/ui`, over an injected API client (device token on the desktop)      |
 | `packages/ai`                                              | Agent prompts, output contracts, the tutor's assistance policy, and the Claude provider (jobs run on the user's desktop) |
 | `packages/curriculum`                                      | Knowledge-graph algorithms and the seed curriculum                                                                       |
 | `packages/sandbox`, `packages/terminal`                    | Isolated code runner; simulated shell for engineering challenges                                                         |
