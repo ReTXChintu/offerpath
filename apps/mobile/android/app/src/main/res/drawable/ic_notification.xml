@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Monochrome status-bar icon: Offerpath's path mark (assets/logo.svg) in white. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
+    <path
+        android:pathData="M232,760 C392,760 400,520 552,520 S712,300 792,264"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="72"
+        android:strokeLineCap="round" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M176,760 a56,56 0 1,0 112,0 a56,56 0 1,0 -112,0" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M696,264 a96,96 0 1,0 192,0 a96,96 0 1,0 -192,0" />
+</vector>
