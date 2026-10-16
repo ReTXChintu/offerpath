@@ -1961,6 +1961,8 @@ a.app-nav-group-label:hover {
 }
 .app-content.no-pad .app-content-inner {
   padding: 0;
+  max-width: none;
+  height: 100%;
 }
 .app-statusbar {
   height: 34px;

@@ -37,6 +37,7 @@ export function AppShell({
   topbar,
   statusbar,
   banner,
+  flush = false,
   children,
 }: {
   sidebar: ReactNode;
@@ -44,6 +45,8 @@ export function AppShell({
   statusbar?: ReactNode;
   /** A strip above the content (an update, an offline notice). */
   banner?: ReactNode;
+  /** The page owns the whole content area (an editor, a terminal, a live interview). */
+  flush?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -52,7 +55,7 @@ export function AppShell({
       <div className="app-main">
         {topbar}
         {banner}
-        <main className="app-content" id="main">
+        <main className={flush ? 'app-content no-pad' : 'app-content'} id="main">
           <div className="app-content-inner">{children}</div>
         </main>
         {statusbar}

@@ -1,10 +1,18 @@
-import type { AgentStatus, CommandName, HuntClient, SetupStatus } from '@offerpath/hunt';
+import type {
+  AgentStatus,
+  CommandName,
+  HuntClient,
+  SetupStatus,
+  SyncStatus,
+} from '@offerpath/hunt';
+import type { LearnClient } from '@offerpath/learn';
 import { createMemoryHistory } from '@tanstack/react-router';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
 import { App } from './App';
+import { tauriLearnClient } from './learn';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(() => Promise.resolve(null)) }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
@@ -85,16 +93,79 @@ function fakeClient(answers: Partial<Record<CommandName, unknown>>) {
   return { client, invoke };
 }
 
-function renderApp(path: string, answers: Partial<Record<CommandName, unknown>> = {}) {
+function syncStatus(configured: boolean): SyncStatus {
+  return {
+    configured,
+    connected: configured,
+    pending: 0,
+    lastSyncAt: null,
+    lastError: null,
+    target: configured ? 'me@example.com @ http://localhost:50005' : null,
+    syncing: false,
+  };
+}
+
+const TODAY = {
+  date: '2026-10-16',
+  startedAt: null,
+  streak: 3,
+  goal: null,
+  learning: {
+    id: 'r1',
+    date: '2026-10-16T00:00:00.000Z',
+    totalMinutes: 30,
+    completedMinutes: 0,
+    recallDue: 0,
+    carriedCount: 0,
+    items: [
+      {
+        id: 'i1',
+        kind: 'LEARN',
+        status: 'PENDING',
+        minutes: 30,
+        title: 'Closures',
+        rationale: 'Next on your roadmap',
+        conceptId: 'c1',
+        exerciseId: null,
+        questionCount: 0,
+        carriedFrom: null,
+      },
+    ],
+  },
+  hunt: { todos: [], approvals: 0, questions: 0 },
+  interviews: [],
+  skillGaps: [],
+  desktopOnline: true,
+};
+
+/** The learning side's API, answered by path. */
+function fakeLearn(routes: Record<string, unknown> = {}) {
+  const request = vi.fn(async (path: string) => {
+    if (path in routes) return routes[path];
+    if (path === '/today') return TODAY;
+    if (path === '/recall/due') return [];
+    return null;
+  });
+  const client: LearnClient = { request: request as LearnClient['request'] };
+  return { client, request };
+}
+
+function renderApp(
+  path: string,
+  answers: Partial<Record<CommandName, unknown>> = {},
+  learnRoutes: Record<string, unknown> = {},
+) {
   const { client, invoke } = fakeClient({
     get_setup_status: setupStatus(true),
     get_agent_status: agentStatus(),
+    get_sync_status: syncStatus(true),
     list_notifications: [],
     ...answers,
   });
+  const learn = fakeLearn(learnRoutes);
   const history = createMemoryHistory({ initialEntries: [path] });
-  render(<App client={client} history={history} requireTauri={false} />);
-  return { history, invoke };
+  render(<App client={client} learnClient={learn.client} history={history} requireTauri={false} />);
+  return { history, invoke, learnRequest: learn.request };
 }
 
 describe('desktop shell', () => {
@@ -115,13 +186,36 @@ describe('desktop shell', () => {
     expect(screen.getByRole('link', { name: 'Today' })).toHaveAttribute('aria-current', 'page');
   });
 
-  it('shows Today, Grow and Progress as phase 3 placeholders', async () => {
-    const user = userEvent.setup();
+  it('opens on Today, the daily plan, with the local agent beside it', async () => {
     renderApp('/');
     expect(await screen.findByRole('heading', { name: 'Today' })).toBeInTheDocument();
-    await user.click(screen.getByRole('link', { name: 'Recall' }));
+    expect(await screen.findByText('Closures')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start my day' })).toBeInTheDocument();
+    expect(screen.getByText('Agent on this desktop')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start a job hunt' })).toBeInTheDocument();
+  });
+
+  it('shows the learning pages from @offerpath/learn', async () => {
+    const user = userEvent.setup();
+    const { learnRequest } = renderApp('/');
+    await user.click(await screen.findByRole('link', { name: 'Recall' }));
     expect(await screen.findByRole('heading', { name: 'Recall' })).toBeInTheDocument();
-    expect(screen.getByText('Coming in phase 3')).toBeInTheDocument();
+    expect(await screen.findByText('Nothing due for review')).toBeInTheDocument();
+    expect(learnRequest).toHaveBeenCalledWith('/recall/due', undefined);
+  });
+
+  it('asks to sign in before the learning pages, and links to Settings → Account', async () => {
+    renderApp('/roadmap', { get_sync_status: syncStatus(false) });
+    expect(await screen.findByText('Sign in to your Offerpath account')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open Settings → Account' })).toHaveAttribute(
+      'href',
+      '#/settings?tab=backend',
+    );
+  });
+
+  it('gives editors the whole content area', async () => {
+    renderApp('/exercise/e1', {}, { '/exercises/e1': null });
+    await waitFor(() => expect(document.querySelector('main.app-content')).toHaveClass('no-pad'));
   });
 
   it('renders the hunt pages through the client', async () => {
@@ -173,5 +267,32 @@ describe('outside Tauri', () => {
   it('explains that Offerpath runs as a desktop app', () => {
     render(<App history={createMemoryHistory({ initialEntries: ['/'] })} />);
     expect(screen.getByText('Offerpath runs as a desktop app')).toBeInTheDocument();
+  });
+});
+
+describe('the desktop learning client', () => {
+  it('calls the API through learn_api_request and passes problem details through', async () => {
+    const call = vi
+      .fn()
+      .mockResolvedValueOnce({ status: 200, body: { ok: 1 } })
+      .mockResolvedValueOnce({
+        status: 503,
+        body: { type: 'urn:offerpath:error:ai-unavailable', title: 'AI unavailable', status: 503 },
+      })
+      .mockRejectedValueOnce({ code: 'BACKEND_NOT_CONFIGURED', message: 'not configured' });
+    const client = tauriLearnClient(call);
+
+    await expect(client.request('/today')).resolves.toEqual({ ok: 1 });
+    expect(call).toHaveBeenCalledWith('learn_api_request', {
+      method: 'GET',
+      path: '/today',
+      body: null,
+      idempotencyKey: null,
+    });
+    await expect(client.request('/ai/hint', { method: 'POST' })).rejects.toMatchObject({
+      kind: 'ai-unavailable',
+      status: 503,
+    });
+    await expect(client.request('/today')).rejects.toMatchObject({ kind: 'not-signed-in' });
   });
 });

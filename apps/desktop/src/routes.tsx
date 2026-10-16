@@ -1,6 +1,9 @@
 import { ApplicationReviewPage, JobDetailPage, SettingsPage, SetupPage } from '@offerpath/hunt';
+import { GoalEditor, LearningSettings } from '@offerpath/learn';
 import { Field, Panel, ThemeSelect } from '@offerpath/ui';
-import { useParams } from '@tanstack/react-router';
+import { useParams, useSearch } from '@tanstack/react-router';
+
+import { RequireAccount } from './learn';
 
 /** Route wrappers: read the URL's params and hand them to the hunt pages. */
 export function JobDetailRoute() {
@@ -13,10 +16,15 @@ export function ApplicationReviewRoute() {
   return <ApplicationReviewPage applicationId={applicationId ?? ''} />;
 }
 
-/** Settings: the desktop's appearance first, then the hunt's settings. */
+/**
+ * Settings: the desktop's appearance, the goal and the Claude models, then
+ * the hunt's settings. `?tab=backend` opens Account.
+ */
 export function SettingsRoute() {
+  const { tab } = useSearch({ strict: false }) as { tab?: string };
   return (
     <SettingsPage
+      initialTab={tab}
       extraTabs={[
         {
           value: 'appearance',
@@ -32,6 +40,18 @@ export function SettingsRoute() {
                 </div>
               </Field>
             </Panel>
+          ),
+        },
+        {
+          value: 'goal',
+          label: 'Goal & learning',
+          content: (
+            <RequireAccount>
+              <div className="col g4">
+                <GoalEditor />
+                <LearningSettings />
+              </div>
+            </RequireAccount>
           ),
         },
       ]}

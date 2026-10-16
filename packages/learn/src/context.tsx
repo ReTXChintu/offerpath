@@ -29,7 +29,7 @@ export const learnPaths = {
   interview: (interviewId: string) => `/interviews/${encodeURIComponent(interviewId)}`,
   progress: '/progress',
   onboarding: '/onboarding',
-  settings: '/settings',
+  settings: '/settings?tab=goal',
   // The hunt's pages, which Today links to (both hosts serve them here).
   applications: '/applications',
   application: (applicationId: string) => `/applications/${encodeURIComponent(applicationId)}`,

@@ -45,9 +45,15 @@ export interface SettingsTab {
 /**
  * The hunt's settings: account sign-in, job sources, agent behaviour,
  * resume generation, Claude and Chrome, mobile pairing and logs. `extraTabs`
- * go first (the host's own settings).
+ * go first (the host's own settings); `initialTab` opens one ("backend" is Account).
  */
-export function SettingsPage({ extraTabs = [] }: { extraTabs?: SettingsTab[] }) {
+export function SettingsPage({
+  extraTabs = [],
+  initialTab,
+}: {
+  extraTabs?: SettingsTab[];
+  initialTab?: string;
+}) {
   const settingsQ = useSettings();
   const save = useSaveSettings();
   const [draft, setDraft] = useState<AppSettings | null>(null);
@@ -90,7 +96,7 @@ export function SettingsPage({ extraTabs = [] }: { extraTabs?: SettingsTab[] }) 
         }
       />
       <ErrorBanner error={save.error} />
-      <Tabs defaultValue={extraTabs[0]?.value ?? 'backend'}>
+      <Tabs defaultValue={initialTab ?? extraTabs[0]?.value ?? 'backend'}>
         <TabsList label="Settings">
           {extraTabs.map((t) => (
             <TabsTrigger key={t.value} value={t.value}>

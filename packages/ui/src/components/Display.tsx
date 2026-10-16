@@ -225,7 +225,7 @@ export function SectionHead({
     <div className="row justify-between items-end mb6 g4 wrap">
       <div>
         {eyebrow && <div className="t-caption mb1">{eyebrow}</div>}
-        <div className="t-h1">{title}</div>
+        <h1 className="t-h1">{title}</h1>
         {description && (
           <div className="t-body mt1" style={{ maxWidth: 640 }}>
             {description}

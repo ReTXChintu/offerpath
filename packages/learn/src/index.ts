@@ -56,6 +56,7 @@ export { RoutineSection } from './features/routine/RoutineSection';
 export { PracticePage } from './features/practice/PracticePage';
 export { RecallPage } from './features/recall/RecallPage';
 export { ProgressPage } from './features/progress/ProgressPage';
+export { FunnelPanel, type FunnelCounts } from './features/progress/FunnelPanel';
 export { LearningSettings, GoalEditor } from './features/settings/Settings';
 export { TodayPage } from './features/today/TodayPage';
 export { DesktopOfflineStrip } from './features/today/DesktopOfflineStrip';
