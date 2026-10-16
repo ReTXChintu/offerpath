@@ -1,0 +1,217 @@
+import 'package:dio/dio.dart';
+
+import '../config.dart';
+import '../models/envelope.dart';
+
+/// What the phone shows when an AI answer needs the desktop and it's off.
+const desktopOfflineAiMessage = "Your desktop is offline: AI answers come back when it's on";
+
+/// A failed API call. The API answers every error as RFC 9457 problem
+/// details (`{type, title, status, detail, errors?}`); this keeps those
+/// fields, plus [code] for the few replies that use `{error: {code,
+/// message}}` (`POST /desktop/request`, and errors from older servers).
+/// A network failure has [status] 0.
+class ApiException implements Exception {
+  final int status;
+
+  /// The problem type URI, e.g. `urn:offerpath:error:invalid-credentials`.
+  final String type;
+  final String title;
+  final String? detail;
+
+  /// Field errors from a `validation-failed` problem.
+  final Map<String, List<String>> errors;
+
+  /// `DESKTOP_OFFLINE`, `NETWORK`, ... when the reply carried a code.
+  final String? code;
+
+  const ApiException({required this.status, required this.type, required this.title, this.detail, this.errors = const {}, this.code});
+
+  /// The last segment of [type]: `invalid-credentials`, `ai-unavailable`.
+  String get kind {
+    final i = type.lastIndexOf(RegExp('[:/]'));
+    return i < 0 ? type : type.substring(i + 1);
+  }
+
+  bool get isNetwork => status == 0;
+  bool get isUnauthorized => status == 401;
+
+  /// The work needed the user's desktop (AI answers, relayed requests) and
+  /// it isn't connected. The API says so with 503.
+  bool get isDesktopOffline => status == 503 || code == 'DESKTOP_OFFLINE';
+
+  /// One sentence for the user.
+  String get message {
+    if (isDesktopOffline) return desktopOfflineAiMessage;
+    if (errors.isNotEmpty) {
+      final first = errors.values.expand((e) => e).where((e) => e.isNotEmpty).firstOrNull;
+      if (first != null) return first;
+    }
+    if (detail != null && detail!.trim().isNotEmpty) return detail!;
+    return title;
+  }
+
+  @override
+  String toString() => message;
+
+  /// Reads an error reply: problem details, `{error: {code, message}}`, or
+  /// anything else (a proxy's HTML page, nothing at all).
+  factory ApiException.fromResponse(int status, dynamic body) {
+    if (body is Map) {
+      final map = body.cast<String, dynamic>();
+      if (map['error'] is Map) {
+        final err = (map['error'] as Map).cast<String, dynamic>();
+        final message = err['message']?.toString();
+        return ApiException(status: status, type: 'urn:offerpath:error:${_slug(status)}', title: message ?? 'Something went wrong.', code: err['code']?.toString());
+      }
+      if (map['title'] is String || map['type'] is String) {
+        final errors = <String, List<String>>{};
+        final raw = map['errors'];
+        if (raw is Map) {
+          raw.forEach((k, v) => errors[k.toString()] = v is List ? v.map((e) => e.toString()).toList() : [v.toString()]);
+        }
+        return ApiException(
+          status: (map['status'] as num?)?.toInt() ?? status,
+          type: map['type']?.toString() ?? 'urn:offerpath:error:${_slug(status)}',
+          title: map['title']?.toString() ?? 'Request failed',
+          detail: map['detail']?.toString(),
+          errors: errors,
+        );
+      }
+    }
+    return ApiException(status: status, type: 'urn:offerpath:error:${_slug(status)}', title: status >= 500 ? 'The server had a problem. Try again in a moment.' : 'Request failed ($status).');
+  }
+
+  static String _slug(int status) => switch (status) {
+        400 => 'bad-request',
+        401 => 'unauthorized',
+        403 => 'forbidden',
+        404 => 'not-found',
+        409 => 'conflict',
+        429 => 'rate-limited',
+        503 => 'unavailable',
+        _ => 'error',
+      };
+}
+
+/// The tokens `POST /auth/login` and `/auth/register` return. Only the
+/// access token is used, once, to register this phone as a device.
+class AuthTokens {
+  final String userId;
+  final String accessToken;
+  const AuthTokens({required this.userId, required this.accessToken});
+}
+
+class DeviceRegistration {
+  final String deviceId;
+  final String deviceToken;
+  const DeviceRegistration({required this.deviceId, required this.deviceToken});
+}
+
+/// REST calls to the Offerpath API (`<server>/api/v1/...`), authorized with
+/// this phone's device token, which the API accepts anywhere a JWT works.
+/// Every method throws [ApiException] on failure.
+class ApiClient {
+  final String serverUrl;
+  final String? token;
+  final Dio _dio;
+
+  ApiClient(String serverUrl, {this.token, Dio? dio, Duration timeout = const Duration(seconds: 20)})
+      : serverUrl = normalizeServerUrl(serverUrl),
+        _dio = dio ?? Dio() {
+    _dio.options
+      ..baseUrl = apiBaseUrl(serverUrl)
+      ..connectTimeout = const Duration(seconds: 15)
+      ..receiveTimeout = timeout
+      ..headers = {
+        ..._dio.options.headers,
+        if (token != null && token!.isNotEmpty) 'Authorization': 'Bearer $token',
+      };
+  }
+
+  /// How long an answer that comes from Claude on the user's desktop may
+  /// take (a tutor reply, an interview question, a first explanation).
+  static const aiTimeout = Duration(minutes: 3);
+
+  Future<dynamic> get(String path, {Map<String, dynamic>? query, Duration? timeout}) => _send('GET', path, query: query, timeout: timeout);
+  Future<dynamic> post(String path, {Object? body, Duration? timeout}) => _send('POST', path, body: body ?? const <String, dynamic>{}, timeout: timeout);
+  Future<dynamic> patch(String path, {Object? body}) => _send('PATCH', path, body: body ?? const <String, dynamic>{});
+  Future<dynamic> put(String path, {Object? body}) => _send('PUT', path, body: body ?? const <String, dynamic>{});
+  Future<dynamic> delete(String path) => _send('DELETE', path);
+
+  Future<dynamic> _send(String method, String path, {Object? body, Map<String, dynamic>? query, Options? options, Duration? timeout}) async {
+    try {
+      final opts = (options ?? Options()).copyWith(method: method, receiveTimeout: timeout);
+      final resp = await _dio.request<dynamic>(path, data: body, queryParameters: query, options: opts);
+      final data = resp.data;
+      // Nest answers `null` (a routine not planned yet) with an empty body.
+      if (data is String && data.isEmpty) return null;
+      return data;
+    } on DioException catch (e) {
+      throw translate(e);
+    }
+  }
+
+  /// Maps a Dio failure to an [ApiException].
+  static ApiException translate(DioException e) {
+    final response = e.response;
+    if (response != null) return ApiException.fromResponse(response.statusCode ?? 0, response.data);
+    final timedOut = e.type == DioExceptionType.connectionTimeout || e.type == DioExceptionType.receiveTimeout || e.type == DioExceptionType.sendTimeout;
+    return ApiException(
+      status: 0,
+      type: 'network',
+      title: timedOut ? 'The server took too long to answer. Check your connection and try again.' : "Couldn't reach the Offerpath server. Check your connection.",
+      code: 'NETWORK',
+    );
+  }
+
+  // -- Accounts and devices -------------------------------------------------
+
+  Future<AuthTokens> login(String email, String password) async =>
+      _tokens(await post('/auth/login', body: {'email': email, 'password': password}));
+
+  Future<AuthTokens> register(String email, String password, String displayName) async =>
+      _tokens(await post('/auth/register', body: {'email': email, 'password': password, 'displayName': displayName}));
+
+  AuthTokens _tokens(dynamic j) {
+    if (j is! Map || j['accessToken'] is! String) throw const ApiException(status: 0, type: 'bad-reply', title: 'Unexpected reply from the server.');
+    return AuthTokens(userId: j['userId']?.toString() ?? '', accessToken: j['accessToken'] as String);
+  }
+
+  /// Registers this phone with a fresh access token (from [login]); the
+  /// device token it returns is the only credential the app keeps.
+  Future<DeviceRegistration> registerDevice({required String accessToken, required String name, required String platform}) async {
+    final j = await _send('POST', '/devices/register',
+        body: {'name': name, 'kind': 'mobile', 'platform': platform}, options: Options(headers: {'Authorization': 'Bearer $accessToken'}));
+    return _device(j);
+  }
+
+  /// Exchanges a pairing code from the desktop for a device token.
+  Future<DeviceRegistration> redeemPairingCode({required String code, required String name, required String platform}) async =>
+      _device(await post('/pairing/redeem', body: {'code': code, 'name': name, 'platform': platform}));
+
+  DeviceRegistration _device(dynamic j) {
+    if (j is! Map || j['deviceToken'] is! String) throw const ApiException(status: 0, type: 'bad-reply', title: 'Unexpected reply from the server.');
+    return DeviceRegistration(deviceId: j['deviceId']?.toString() ?? '', deviceToken: j['deviceToken'] as String);
+  }
+
+  /// Signs a device out (this phone's own, on sign-out).
+  Future<void> revokeDevice(String deviceId) => delete('/devices/${Uri.encodeComponent(deviceId)}');
+
+  /// Where Firebase should push for this phone; null stops pushes.
+  Future<void> setPushToken(String? pushToken) => put('/devices/me/push-token', body: {'token': pushToken});
+
+  // -- The desktop --------------------------------------------------------
+
+  /// One request to the desktop over HTTP (`POST /desktop/request`), the
+  /// same as a hub request frame. Never throws: failures come back as a
+  /// [RelayResponse] with the desktop's code (`DESKTOP_OFFLINE`, ...).
+  Future<RelayResponse> desktopRequest(String type, [Map<String, dynamic> payload = const {}]) async {
+    try {
+      final j = await post('/desktop/request', body: {'type': type, 'payload': payload});
+      return RelayResponse(ok: true, data: j is Map ? j['data'] : null);
+    } on ApiException catch (e) {
+      return RelayResponse(ok: false, errorCode: e.code ?? (e.isDesktopOffline ? 'DESKTOP_OFFLINE' : e.kind.toUpperCase()), errorMessage: e.isDesktopOffline ? null : e.message);
+    }
+  }
+}

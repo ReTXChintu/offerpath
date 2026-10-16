@@ -4,18 +4,29 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// Firebase Cloud Messaging (instant notifications with the app closed) needs
+// google-services.json from the Firebase console, which isn't committed (CI
+// writes it from the GOOGLE_SERVICES_JSON secret). Without it the app still
+// builds and falls back to its periodic background check.
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+} else {
+    logger.warn("android/app/google-services.json not found: building without Firebase push notifications.")
+}
+
 android {
     namespace = "app.offerpath.mobile"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
+        // Required by flutter_local_notifications.
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "app.offerpath.mobile"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
@@ -29,11 +40,33 @@ android {
         versionName = flutter.versionName
     }
 
+    // Release signing comes from environment variables (CI decodes the
+    // ANDROID_KEYSTORE_BASE64 secret to a file, see .github/workflows/build.yml).
+    // A stable key matters: Android refuses to install an update signed with
+    // a different key, and every CI runner has its own throwaway debug key.
+    // Without these variables the build falls back to the debug key, which is
+    // fine for local testing only.
+    val keystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
+    val hasReleaseKey = !keystorePath.isNullOrBlank() && file(keystorePath).exists()
+    signingConfigs {
+        if (hasReleaseKey) {
+            create("release") {
+                storeFile = file(keystorePath!!)
+                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (hasReleaseKey) {
+                signingConfigs.getByName("release")
+            } else {
+                logger.warn("ANDROID_KEYSTORE_PATH not set: signing the release APK with the debug key.")
+                signingConfigs.getByName("debug")
+            }
         }
     }
 }
@@ -46,4 +79,8 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }

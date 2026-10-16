@@ -1,50 +1,82 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
-/// The server this build talks to, compiled in by CI
-/// (`--dart-define=OFFERPATH_SERVER_URL=http://<server-ip>:50005`).
-const serverUrl = String.fromEnvironment(
-  'OFFERPATH_SERVER_URL',
-  defaultValue: 'http://10.0.2.2:50005',
-);
+import 'app.dart';
+import 'services/notification_service.dart';
+import 'services/push_service.dart';
+import 'state/agent_controller.dart';
+import 'state/applications_controller.dart';
+import 'state/auth_controller.dart';
+import 'state/connection_controller.dart';
+import 'state/jobs_controller.dart';
+import 'state/learning_controller.dart';
+import 'state/nav_controller.dart';
+import 'state/notifications_controller.dart';
+import 'state/profiles_controller.dart';
+import 'state/queue_controller.dart';
+import 'state/update_controller.dart';
 
-void main() {
-  runApp(const OfferpathApp());
-}
-
-class OfferpathApp extends StatelessWidget {
-  const OfferpathApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Offerpath',
-      theme: ThemeData(colorSchemeSeed: const Color(0xFF1F4FD8)),
-      darkTheme: ThemeData(
-        colorSchemeSeed: const Color(0xFF1F4FD8),
-        brightness: Brightness.dark,
-      ),
-      home: const HomePage(),
-    );
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  // Firebase push is optional: without google-services.json in the build
+  // this logs and the app relies on the WebSocket and periodic checks.
+  try {
+    await PushService.instance.init();
+  } catch (e) {
+    debugPrint('push setup failed: $e');
   }
-}
+  // The alerts channel must exist before any push arrives, and a
+  // notification tap that launched the app should open its screen.
+  try {
+    await NotificationService.instance.start();
+  } catch (e) {
+    debugPrint('notification setup failed: $e');
+  }
+  final auth = AuthController();
+  await auth.loadPersisted();
 
-class HomePage extends StatelessWidget {
-  const HomePage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Offerpath')),
-      body: const Center(
-        child: Padding(
-          padding: EdgeInsets.all(24),
-          child: Text(
-            'Finds the jobs, gets you ready for the interviews, and moves you '
-            'one step closer to the offer every day.',
-            textAlign: TextAlign.center,
-          ),
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider.value(value: auth),
+        ChangeNotifierProvider(create: (_) => NavController()),
+        ChangeNotifierProvider(create: (_) => UpdateController(auth), lazy: false),
+        ChangeNotifierProvider(create: (_) => LearningController(auth)),
+        ChangeNotifierProxyProvider<AuthController, ConnectionController>(
+          create: (_) => ConnectionController(auth),
+          update: (_, auth, previous) => previous ?? ConnectionController(auth),
         ),
-      ),
-    );
-  }
+        ChangeNotifierProxyProvider<ConnectionController, NotificationsController>(
+          create: (context) => NotificationsController(auth, context.read<ConnectionController>()),
+          update: (_, connection, previous) => previous ?? NotificationsController(auth, connection),
+          lazy: false,
+        ),
+        ChangeNotifierProxyProvider<ConnectionController, ApplicationsController>(
+          create: (context) => ApplicationsController(context.read<ConnectionController>()),
+          update: (_, connection, previous) => previous ?? ApplicationsController(connection),
+        ),
+        ChangeNotifierProxyProvider<ConnectionController, JobsController>(
+          create: (context) => JobsController(context.read<ConnectionController>()),
+          update: (_, connection, previous) => previous ?? JobsController(connection),
+        ),
+        ChangeNotifierProxyProvider<ConnectionController, AgentController>(
+          create: (context) => AgentController(context.read<ConnectionController>()),
+          update: (_, connection, previous) => previous ?? AgentController(connection),
+        ),
+        ChangeNotifierProxyProvider<ConnectionController, QueueController>(
+          create: (context) => QueueController(context.read<ConnectionController>()),
+          update: (_, connection, previous) => previous ?? QueueController(connection),
+        ),
+        ChangeNotifierProxyProvider<ConnectionController, ProfilesController>(
+          create: (context) => ProfilesController(context.read<ConnectionController>()),
+          update: (_, connection, previous) => previous ?? ProfilesController(connection),
+        ),
+        ChangeNotifierProxyProvider<ConnectionController, AnswersController>(
+          create: (context) => AnswersController(context.read<ConnectionController>()),
+          update: (_, connection, previous) => previous ?? AnswersController(connection),
+        ),
+      ],
+      child: const OfferpathApp(),
+    ),
+  );
 }
