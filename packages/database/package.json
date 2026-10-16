@@ -27,7 +27,8 @@
     "typecheck": "pnpm generate && tsc --noEmit",
     "lint": "eslint src",
     "test": "vitest run --passWithNoTests",
-    "import:job-hunter": "dotenv -e ../../.env -- tsx src/import/job-hunter.ts"
+    "import:job-hunter": "dotenv -e ../../.env -- tsx src/import/job-hunter.ts",
+    "seed": "dotenv -e ../../.env -- tsx prisma/seed.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.2.1"
@@ -40,6 +41,7 @@
     "tsup": "^8.3.5",
     "tsx": "^4.23.15",
     "typescript": "^5.9.0",
-    "vitest": "^3.2.0"
+    "vitest": "^3.2.0",
+    "@offerpath/curriculum": "workspace:*"
   }
 }

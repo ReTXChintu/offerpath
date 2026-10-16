@@ -1,27 +1,29 @@
-// Offerpath data model, on PostgreSQL (Neon).
+// Offerpath data model, on PostgreSQL (Neon). ForgeRoutine's learning models
+// moved in unchanged (docs/plan.md, section 4.1), plus devices, sync, AI jobs.
 //
-// Phase 1 moves ForgeRoutine's models in unchanged and adds devices,
-// notifications, ai_jobs, goals and daily_plans (docs/plan.md, section 4.1).
-// Every user-owned row carries a user id.
+// PostgreSQL is the source of truth for all learning state. Redis holds nothing
+// that cannot be rebuilt from here.
 
 generator client {
   provider = "prisma-client-js"
+  // Default resolution (node_modules/.prisma/client) so `@prisma/client` is a plain
+  // external dependency that tsup and NestJS can resolve without bundling engines.
+  // Prisma 7 will require an explicit `output`; revisit at that upgrade.
 }
 
 datasource db {
   provider  = "postgresql"
-  // Pooled connection for the app; direct connection for migrations.
   url       = env("DATABASE_URL")
   directUrl = env("DIRECT_DATABASE_URL")
 }
 
 // ===========================================================================
 // Identity
+//
+// Deliberately decoupled from learning logic (§34). No learning table knows how
+// the user authenticated; they reference userId only.
 // ===========================================================================
 
-/// ForgeRoutine's `users` table, column for column, so its rows move in as
-/// they are. Job Hunter accounts are matched to it by email; both apps hash
-/// passwords with bcrypt, so hashes are copied unchanged.
 model User {
   id            String    @id @default(cuid())
   email         String    @unique
@@ -33,15 +35,1338 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  syncDocuments SyncDocument[]
+  devices           Device[]
+  pairingCodes      PairingCode[]
+  syncDocuments     SyncDocument[]
+  aiJobs            AiJob[]
+  conceptChats      ConceptChatMessage[]
+  questionAnswers   ConceptQuestionAnswer[]
+  assignments       PracticeAssignment[]
+  preferences       UserPreferences?
+  refreshTokens     RefreshToken[]
+  technologies      UserTechnology[]
+  skills            Skill[]
+  skillEvents       SkillEvent[]
+  attempts          ExerciseAttempt[]
+  submissions       CodeSubmission[]
+  sessions          LearningSession[]
+  routines          Routine[]
+  reviewSchedules   ReviewSchedule[]
+  aiInteractions    AIInteraction[]
+  tokenUsage        TokenUsageDaily[]
+  progressSnapshots ProgressSnapshot[]
+  interviews        Interview[]
+  roadmaps          Roadmap[]
+  generationJobs    GenerationJob[]
 
   @@index([archivedAt])
   @@map("users")
 }
 
+model UserPreferences {
+  id                   String          @id @default(cuid())
+  userId               String          @unique
+  user                 User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dailyMinutes         Int             @default(45)
+  adaptiveDifficulty   Boolean         @default(true)
+  interviewTarget      InterviewTarget @default(MID)
+  primaryGoal          PrimaryGoal     @default(CODING)
+  timezone             String          @default("UTC")
+  /// Claude models (CLI aliases or full ids) per kind of work. The only AI
+  /// setting: Claude runs on the user's own desktop with their own sign-in.
+  /// Fast: grading, hints, short answers. Reasoning: curriculum and planning.
+  claudeModelFast      String          @default("sonnet")
+  claudeModelReasoning String          @default("opus")
+  /// The tutor chat's model. Null follows claudeModelFast.
+  claudeModelTutor     String?
+  /// Null until the first-run flow completes. Drives the onboarding redirect.
+  onboardedAt          DateTime?
+  /// Optional. A real date reorders everything downstream toward readiness.
+  interviewDate        DateTime?
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+
+  @@map("user_preferences")
+}
+
+/// Refresh tokens are single-use and rotate. `familyId` groups a rotation chain so
+/// that presenting an already-used token can revoke the whole family (reuse detection).
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  familyId  String
+  expiresAt DateTime
+  usedAt    DateTime?
+  revokedAt DateTime?
+  userAgent String?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, familyId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
 // ===========================================================================
-// Hunt data synced from the desktop
+// Learning universe
 // ===========================================================================
+
+/// Global catalogue row. Users relate to it via UserTechnology, so adding a
+/// technology never duplicates curriculum per user.
+model Technology {
+  id                String  @id @default(cuid())
+  slug              String  @unique
+  name              String
+  description       String  @default("")
+  category          String  @default("general")
+  /// True when a hand-written concept graph ships in the seed data.
+  curatedCurriculum Boolean @default(false)
+  /// Language its exercises can be executed in, or null when the technology
+  /// cannot be practised in the sandbox at all.
+  ///
+  /// Docker, Linux and SQL are real subjects with real concepts, but no
+  /// JavaScript test can grade "containers vs virtual machines". Those
+  /// technologies get concept questions instead of runnable exercises — which
+  /// is honest, rather than generating code exercises that cannot work.
+  exerciseLanguage  String? @default("javascript")
+
+  /// Slugs that should be learned first. Hand-authored in the catalogue.
+  ///
+  /// Curriculum is generated one technology at a time, in this order, so a
+  /// user never pays for React before JavaScript exists. The generator does
+  /// propose cross-technology prerequisites, but only once both sides have
+  /// been built — too late to decide what to build first.
+  dependsOn     String[] @default([])
+  /// Position in the intended reading order; lower comes first. `dependsOn`
+  /// says what is forbidden, this says what is wanted.
+  learningOrder Int      @default(500)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  concepts           Concept[]
+  userTechnologies   UserTechnology[]
+  curriculumVersions CurriculumVersion[]
+
+  @@index([category])
+  @@map("technologies")
+}
+
+model UserTechnology {
+  id           String     @id @default(cuid())
+  userId       String
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  technologyId String
+  technology   Technology @relation(fields: [technologyId], references: [id], onDelete: Cascade)
+
+  status              UserTechnologyStatus @default(ACTIVE)
+  priority            Priority             @default(NORMAL)
+  targetProficiency   TargetProficiency    @default(WORKING)
+  /// 0-5. Multiplies interview-readiness weighting in the routine and interview engines.
+  interviewImportance Int                  @default(3)
+  frequency           LearningFrequency    @default(FREQUENT)
+  /// Self-declared starting point in [0,1], used to seed skills so an expert
+  /// is never shown "Variables".
+  existingKnowledge   Float?
+
+  /// Soft delete (§5). Removing a technology must never destroy learning history.
+  archivedAt DateTime?
+  pausedAt   DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@unique([userId, technologyId])
+  @@index([userId, status])
+  @@map("user_technologies")
+}
+
+model CurriculumVersion {
+  id               String           @id @default(cuid())
+  technologyId     String
+  technology       Technology       @relation(fields: [technologyId], references: [id], onDelete: Cascade)
+  version          Int
+  generatorVersion String
+  status           CurriculumStatus @default(GENERATING)
+  model            String?
+  promptVersion    String?
+  conceptCount     Int              @default(0)
+  error            String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  concepts Concept[]
+
+  @@unique([technologyId, version])
+  @@index([technologyId, status])
+  @@map("curriculum_versions")
+}
+
+model Concept {
+  id                  String             @id @default(cuid())
+  technologyId        String
+  technology          Technology         @relation(fields: [technologyId], references: [id], onDelete: Cascade)
+  curriculumVersionId String?
+  curriculumVersion   CurriculumVersion? @relation(fields: [curriculumVersionId], references: [id])
+
+  slug               String
+  name               String
+  description        String    @default("")
+  difficulty         Int       @default(3)
+  orderIndex         Int       @default(0)
+  learningObjectives String[]  @default([])
+  codingPatterns     String[]  @default([])
+  /// Source material for the debugging-exercise generator and for the evaluator's
+  /// recognition of known failure modes.
+  commonMistakes     String[]  @default([])
+  archivedAt         DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  prerequisites      ConceptPrerequisite[]   @relation("ConceptToPrerequisites")
+  dependents         ConceptPrerequisite[]   @relation("PrerequisiteToConcepts")
+  exercises          Exercise[]
+  questions          ConceptQuestion[]
+  explainer          ConceptExplainer?
+  chatMessages       ConceptChatMessage[]
+  questionAnswers    ConceptQuestionAnswer[]
+  assignments        PracticeAssignment[]
+  skills             Skill[]
+  reviewSchedules    ReviewSchedule[]
+  sessions           LearningSession[]
+  routineItems       RoutineItem[]
+  interviewQuestions InterviewQuestion[]
+  roadmapItems       RoadmapItem[]
+
+  @@unique([technologyId, slug])
+  @@index([technologyId, orderIndex])
+  @@map("concepts")
+}
+
+/// Directed prerequisite edge. Must form a DAG; the cycle check lives in
+/// packages/curriculum because Postgres cannot express it cheaply.
+model ConceptPrerequisite {
+  conceptId      String
+  concept        Concept              @relation("ConceptToPrerequisites", fields: [conceptId], references: [id], onDelete: Cascade)
+  prerequisiteId String
+  prerequisite   Concept              @relation("PrerequisiteToConcepts", fields: [prerequisiteId], references: [id], onDelete: Cascade)
+  strength       PrerequisiteStrength @default(HARD)
+  createdAt      DateTime             @default(now())
+
+  @@id([conceptId, prerequisiteId])
+  @@index([prerequisiteId])
+  @@map("concept_prerequisites")
+}
+
+// ===========================================================================
+// Skill model
+//
+// Nine dimensions as separate columns, not a JSON blob: we sort, filter and
+// aggregate on them constantly (§7).
+// ===========================================================================
+
+model Skill {
+  id        String  @id @default(cuid())
+  userId    String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conceptId String
+  concept   Concept @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+
+  conceptMastery     Float @default(0)
+  recallStrength     Float @default(0)
+  codingAbility      Float @default(0)
+  problemSolving     Float @default(0)
+  debuggingAbility   Float @default(0)
+  explanationAbility Float @default(0)
+  interviewReadiness Float @default(0)
+  confidence         Float @default(0)
+  retention          Float @default(0)
+
+  /// The user's earned assistance level for this concept (§8).
+  assistanceLevel Int       @default(1)
+  attempts        Int       @default(0)
+  lastPracticedAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  events SkillEvent[]
+
+  @@unique([userId, conceptId])
+  @@index([userId, codingAbility])
+  @@index([userId, conceptMastery])
+  @@index([userId, interviewReadiness])
+  @@map("skills")
+}
+
+/// Append-only ledger. `Skill` is a materialised projection of this.
+/// Keeping the ledger is what makes "why did my score drop?" answerable and lets
+/// scoring formulas be recomputed retroactively after a fix.
+model SkillEvent {
+  id        String          @id @default(cuid())
+  userId    String
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  skillId   String
+  skill     Skill           @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  dimension String
+  before    Float
+  after     Float
+  cause     SkillEventCause
+  /// Free-form reference to the attempt, interview or job that caused the change.
+  sourceId  String?
+  note      String?
+  createdAt DateTime        @default(now())
+
+  @@index([userId, createdAt])
+  @@index([skillId, createdAt])
+  @@map("skill_events")
+}
+
+model ProgressSnapshot {
+  id                     String   @id @default(cuid())
+  userId                 String
+  user                   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  capturedOn             DateTime @db.Date
+  independentCodingScore Float?
+  interviewReadiness     Float?
+  conceptsPractised      Int      @default(0)
+  minutesPractised       Int      @default(0)
+  attemptsTotal          Int      @default(0)
+  attemptsIndependent    Int      @default(0)
+  createdAt              DateTime @default(now())
+
+  @@unique([userId, capturedOn])
+  @@index([userId, capturedOn])
+  @@map("progress_snapshots")
+}
+
+// ===========================================================================
+// Exercises, attempts, submissions
+// ===========================================================================
+
+model Exercise {
+  id         String       @id @default(cuid())
+  conceptId  String
+  concept    Concept      @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+  slug       String
+  title      String
+  kind       ExerciseKind @default(CODING)
+  difficulty Int          @default(3)
+  language   String       @default("javascript")
+
+  /// Shown at level 4 (Blank): the entire prompt is this one line.
+  objective         String
+  /// Shown at levels 1-3.
+  requirements      String   @default("")
+  /// Levels 1-2 only.
+  functionSignature String?
+  /// Level 1 only.
+  starterCode       String?
+  examples          String[] @default([])
+  /// Fallback hints used when AI is unavailable (docs/ai-architecture.md).
+  staticHints       String[] @default([])
+  /// Reference solution. Never sent to the client below SHOW_SOLUTION.
+  referenceSolution String?
+
+  /// DEBUGGING exercises only (§13): realistic broken code the user must
+  /// diagnose. Unlike starterCode this IS shown at every assistance level —
+  /// the bug is the problem statement.
+  brokenCode String?
+
+  /// Kind-specific payload for SYSTEM_DESIGN, INCIDENT and TERMINAL.
+  ///
+  /// JSON rather than three sets of columns: the three shapes have nothing in
+  /// common, and adding fifteen nullable columns that are null for every
+  /// ordinary exercise would make the table harder to read for no gain. The
+  /// shapes are validated by Zod at the boundary, which is where the schema
+  /// for them actually lives.
+  challengeSpec    Json?
+  /// What is actually wrong. Used to grade the diagnosis; never sent to the
+  /// client before the user has submitted one.
+  bugExplanation   String?
+  estimatedMinutes Int       @default(15)
+  archivedAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  testCases    ExerciseTestCase[]
+  steps        ProjectStep[]
+  attempts     ExerciseAttempt[]
+  routineItems RoutineItem[]
+  roadmapItems RoadmapItem[]
+  assignments  PracticeAssignment[]
+
+  @@unique([conceptId, slug])
+  @@index([conceptId, kind])
+  @@map("exercises")
+}
+
+/// One stage of a PROJECT exercise (§14).
+///
+/// Projects are progressive: API, then auth, then validation, then error
+/// handling. Each step is submitted and reviewed on its own, because the point
+/// is composition over time rather than one large drop.
+model ProjectStep {
+  id                String   @id @default(cuid())
+  exerciseId        String
+  exercise          Exercise @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+  orderIndex        Int
+  title             String
+  requirements      String   @default("")
+  /// Carried into the next step, so the project accumulates rather than restarting.
+  starterCode       String?
+  referenceSolution String?
+  estimatedMinutes  Int      @default(20)
+  createdAt         DateTime @default(now())
+
+  testCases ExerciseTestCase[]
+
+  @@unique([exerciseId, orderIndex])
+  @@index([exerciseId, orderIndex])
+  @@map("project_steps")
+}
+
+model ExerciseTestCase {
+  id         String       @id @default(cuid())
+  exerciseId String
+  exercise   Exercise     @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+  /// Set when this case belongs to one step of a project rather than the
+  /// exercise as a whole.
+  stepId     String?
+  step       ProjectStep? @relation(fields: [stepId], references: [id], onDelete: Cascade)
+  name       String
+  /// Executed but not revealed before submission.
+  hidden     Boolean      @default(false)
+  orderIndex Int          @default(0)
+  /// JS source evaluated inside the sandbox harness. Never run in the API process.
+  code       String
+  createdAt  DateTime     @default(now())
+
+  @@index([exerciseId, orderIndex])
+  @@map("exercise_test_cases")
+}
+
+/// The unit the Coding Muscle system measures. One attempt, many submissions.
+model ExerciseAttempt {
+  id         String           @id @default(cuid())
+  userId     String
+  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  exerciseId String
+  exercise   Exercise         @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+  sessionId  String?
+  session    LearningSession? @relation(fields: [sessionId], references: [id])
+
+  assistanceLevel Int            @default(1)
+  outcome         AttemptOutcome @default(IN_PROGRESS)
+  blindMode       Boolean        @default(false)
+
+  openedAt          DateTime  @default(now())
+  firstCodeAt       DateTime?
+  completedAt       DateTime?
+  timeToFirstCodeMs Int?
+  totalDurationMs   Int?
+
+  /// Server-authoritative. These feed the Independent Coding Score; client-reported
+  /// signals never do.
+  aiRequestCount   Int     @default(0)
+  solutionRevealed Boolean @default(false)
+  submissionCount  Int     @default(0)
+
+  /// PROJECT attempts: which step the user is on. Steps unlock in order.
+  currentStep Int @default(0)
+
+  /// What is in the editor right now, saved as it is typed.
+  ///
+  /// Distinct from CodeSubmission, which records what the user chose to
+  /// submit. Without this, closing a tab threw away everything since the
+  /// last submit — and an editor that quietly discards work is one nobody
+  /// trusts twice.
+  draftCode    String?
+  draftSavedAt DateTime?
+
+  /// Advisory only, client-reported, never scored.
+  keystrokeCount   Int?
+  largePasteEvents Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  submissions  CodeSubmission[]
+  hintRequests HintRequest[]
+
+  @@index([userId, createdAt])
+  @@index([userId, exerciseId])
+  @@index([exerciseId, outcome])
+  @@map("exercise_attempts")
+}
+
+model CodeSubmission {
+  id             String          @id @default(cuid())
+  attemptId      String
+  attempt        ExerciseAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  code           String
+  language       String          @default("javascript")
+  /// DEBUGGING exercises: the user's written diagnosis, submitted alongside the
+  /// fix. Graded separately, because finding a fault and repairing it are
+  /// different abilities (§13).
+  diagnosis      String?
+  /// PROJECT submissions: which step this was for.
+  stepIndex      Int?
+  /// Set when the client supplied an Idempotency-Key, so a double-click cannot
+  /// create two submissions.
+  idempotencyKey String?
+  createdAt      DateTime        @default(now())
+
+  execution  ExecutionResult?
+  evaluation CodeEvaluation?
+
+  @@unique([attemptId, idempotencyKey])
+  @@index([userId, createdAt])
+  @@map("code_submissions")
+}
+
+model ExecutionResult {
+  id           String          @id @default(cuid())
+  submissionId String          @unique
+  submission   CodeSubmission  @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  status       ExecutionStatus
+  passed       Boolean         @default(false)
+  testsPassed  Int             @default(0)
+  testsTotal   Int             @default(0)
+  /// TestCaseResult[]; shape validated by Zod before write.
+  cases        Json            @default("[]")
+  stdout       String          @default("")
+  stderr       String          @default("")
+  durationMs   Int             @default(0)
+  truncated    Boolean         @default(false)
+  createdAt    DateTime        @default(now())
+
+  @@map("execution_results")
+}
+
+/// AI quality assessment. Null dimensions mean *unscored*, never zero — writing a
+/// zero would corrupt the skill model, which is the product's long-term memory.
+model CodeEvaluation {
+  id                    String         @id @default(cuid())
+  submissionId          String         @unique
+  submission            CodeSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  overallScore          Float?
+  correctness           Float?
+  readability           Float?
+  architecture          Float?
+  performance           Float?
+  security              Float?
+  errorHandling         Float?
+  edgeCases             Float?
+  idiomatic             Float?
+  /// How accurately the user identified the fault, independent of the fix.
+  diagnosisAccuracy     Float?
+  strengths             String[]       @default([])
+  weaknesses            String[]       @default([])
+  conceptGaps           String[]       @default([])
+  recommendedDifficulty String         @default("same")
+  nextAction            String         @default("practice")
+  /// True when AI was unavailable and only execution facts were used.
+  degraded              Boolean        @default(false)
+  /// Tech-lead review issues on a project step (§14, §31): severity, category,
+  /// title, explanation, line. Shape validated by Zod before write.
+  reviewIssues          Json           @default("[]")
+  createdAt             DateTime       @default(now())
+
+  @@map("code_evaluations")
+}
+
+model HintRequest {
+  id               String          @id @default(cuid())
+  attemptId        String
+  attempt          ExerciseAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  kind             HintKind
+  response         String
+  /// Drives the early-solution intervention (§10).
+  secondsSinceOpen Int             @default(0)
+  /// True when the anti-dependency intervention replaced the requested hint.
+  intervened       Boolean         @default(false)
+  degraded         Boolean         @default(false)
+  createdAt        DateTime        @default(now())
+
+  @@index([attemptId, createdAt])
+  @@map("hint_requests")
+}
+
+// ===========================================================================
+// Routine and review
+// ===========================================================================
+
+model Routine {
+  id               String   @id @default(cuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date             DateTime @db.Date
+  totalMinutes     Int      @default(45)
+  completedMinutes Int      @default(0)
+  generatedBy      String   @default("rules")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  items RoutineItem[]
+
+  @@unique([userId, date])
+  @@index([userId, date])
+  @@map("routines")
+}
+
+model RoutineItem {
+  id            String            @id @default(cuid())
+  routineId     String
+  routine       Routine           @relation(fields: [routineId], references: [id], onDelete: Cascade)
+  kind          RoutineItemKind
+  status        RoutineItemStatus @default(PENDING)
+  minutes       Int               @default(10)
+  orderIndex    Int               @default(0)
+  title         String
+  /// Why the planner chose this. Shown to the user; an opaque routine is not trusted.
+  rationale     String            @default("")
+  conceptId     String?
+  concept       Concept?          @relation(fields: [conceptId], references: [id])
+  exerciseId    String?
+  exercise      Exercise?         @relation(fields: [exerciseId], references: [id])
+  /// RECALL items: how many questions to ask on this concept. Stored rather
+  /// than counted at read time so the plan says the same thing all day, even
+  /// if the concept gains questions while the user is working through it.
+  questionCount Int               @default(0)
+  /// The day this item was originally planned for, when it has been carried
+  /// forward. Shown to the user, because "three days late" is information
+  /// they are entitled to and a silent backlog is not.
+  carriedFrom   DateTime?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  sessions LearningSession[]
+
+  @@index([routineId, orderIndex])
+  @@map("routine_items")
+}
+
+model LearningSession {
+  id            String       @id @default(cuid())
+  userId        String
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  routineItemId String?
+  routineItem   RoutineItem? @relation(fields: [routineItemId], references: [id])
+  conceptId     String?
+  concept       Concept?     @relation(fields: [conceptId], references: [id])
+  startedAt     DateTime     @default(now())
+  endedAt       DateTime?
+  /// When the client last said "still working".
+  ///
+  /// Time is banked as it passes rather than computed at the end, so a
+  /// closed laptop keeps what it earned instead of losing the session, and
+  /// a tab left open earns nothing because the beats stop.
+  lastBeatAt    DateTime?
+  durationMs    Int?         @default(0)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  attempts ExerciseAttempt[]
+
+  @@index([userId, startedAt])
+  @@map("learning_sessions")
+}
+
+model ReviewSchedule {
+  id             String    @id @default(cuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conceptId      String
+  concept        Concept   @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+  easeFactor     Float     @default(2.5)
+  intervalDays   Int       @default(0)
+  repetitions    Int       @default(0)
+  lapses         Int       @default(0)
+  dueAt          DateTime  @default(now())
+  lastReviewedAt DateTime?
+  /// Frozen while the parent technology is paused (§5).
+  frozenAt       DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([userId, conceptId])
+  @@index([userId, dueAt])
+  @@map("review_schedules")
+}
+
+/// A short conceptual question about one concept.
+///
+/// Two jobs: they are the only practice available for technologies the sandbox
+/// cannot execute, and they are the source for the recall prompts that feed
+/// `recallStrength` and `retention` (docs/learning-path.md).
+/// The teaching material for one concept, generated once and shared.
+///
+/// Per concept rather than per user: the explanation of a closure does not
+/// depend on who is reading it, and generating it per user would multiply
+/// the bill by the user count for identical text. The chat beside it is
+/// where the per-person part happens.
+model ConceptExplainer {
+  id        String  @id @default(cuid())
+  conceptId String  @unique
+  concept   Concept @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+
+  /// Plain-English explanation of what it is and why it exists.
+  summary      String
+  /// Where this actually shows up in real systems.
+  realWorld    String
+  /// Worked examples, each a short paragraph.
+  examples     String[] @default([])
+  /// Illustrative code, or null for concepts that are not about code.
+  codeExample  String?
+  codeLanguage String?
+  /// What people get wrong, in the author's words rather than the seed's.
+  pitfalls     String[] @default([])
+
+  /// Official documentation for this concept, when one exists.
+  docsUrl       String?
+  /// Which model wrote it, so a bad batch can be found and regenerated.
+  generatedBy   String
+  /// The prompt that produced it. Bumping the prompt rewrites every page
+  /// on next open, which is the only way an improvement reaches material
+  /// that was already generated and cached.
+  promptVersion String   @default("v1")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("concept_explainers")
+}
+
+/// One turn of a user's doubt-clearing conversation about a concept.
+///
+/// Per user, unlike the explainer: the whole value is that it knows what
+/// this person has already failed at.
+model ConceptChatMessage {
+  id        String  @id @default(cuid())
+  userId    String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conceptId String
+  concept   Concept @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+
+  /// "user" or "assistant". Not an enum: this is a transcript, and a third
+  /// role would be a migration for no gain.
+  role      String
+  content   String
+  createdAt DateTime @default(now())
+
+  @@index([userId, conceptId, createdAt])
+  @@map("concept_chat_messages")
+}
+
+model ConceptQuestion {
+  id            String              @id @default(cuid())
+  conceptId     String
+  concept       Concept             @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+  kind          ConceptQuestionKind @default(MCQ)
+  prompt        String
+  /// MCQ only. Two to five options; exactly one is correct. Empty for THEORY.
+  options       String[]            @default([])
+  correctIndex  Int                 @default(0)
+  /// Shown after answering, right or wrong. This is where the learning is.
+  explanation   String              @default("")
+  /// THEORY only: what a good answer says. Never sent before one arrives —
+  /// a written answer compared against a model answer you have already read
+  /// measures nothing.
+  modelAnswer   String?
+  /// THEORY only: the points a complete answer covers, so "did I get it?"
+  /// is a checklist rather than a feeling.
+  keyPoints     String[]            @default([])
+  difficulty    Int                 @default(3)
+  /// Which agent and model wrote it. Null for the hand-authored seed.
+  generatedBy   String?
+  /// Bumped when the prompt improves, so a cached set is rewritten rather
+  /// than frozen at whatever the first version produced.
+  promptVersion String?
+  archivedAt    DateTime?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  answers     ConceptQuestionAnswer[]
+  assignments PracticeAssignment[]
+
+  @@index([conceptId])
+  @@index([conceptId, kind])
+  @@map("concept_questions")
+}
+
+/// One answer a user gave to a concept question, of either kind.
+///
+/// Stored because completion depends on it: a concept's practice is finished
+/// when every question the user was *served* has an answer here. Nothing
+/// recorded the multiple-choice ones before, so there was no way to tell a
+/// finished set from an untouched one.
+///
+/// For THEORY, `selfRating` is self-reported, which is why it feeds the
+/// review schedule at a low learning rate and never touches coding ability.
+/// It is the same bargain every spaced-repetition system makes — only the
+/// person who wrote the answer can say whether they actually knew it — and it
+/// holds because the model answer is withheld until after they commit.
+model ConceptQuestionAnswer {
+  id         String          @id @default(cuid())
+  userId     String
+  user       User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  questionId String
+  question   ConceptQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  conceptId  String
+  concept    Concept         @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+
+  /// MCQ: which option they picked, and whether it was the right one.
+  selectedIndex Int?
+  correct       Boolean?
+
+  /// THEORY: what they wrote, before seeing the model answer.
+  answer     String?
+  /// THEORY: 0 missed it, 1 partly, 2 got it. The fallback when there is no AI
+  /// to mark it — only the person who wrote an answer can judge it otherwise.
+  selfRating Int?
+
+  /// THEORY, marked by AI: 0-5 against the question's own model answer.
+  ///
+  /// Preferred over `selfRating` where it exists. A written answer exists to
+  /// surface what the writer cannot yet put into words, which is precisely
+  /// what they are least able to spot in their own work.
+  gradeScore   Int?
+  /// What the answer got right, in the marker's words.
+  gradeCorrect String[] @default([])
+  /// What was wrong or missing, stated as the mistake.
+  gradeWrong   String[] @default([])
+  /// What would make it full marks. Concrete, not "add detail".
+  gradeImprove String[] @default([])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, conceptId, createdAt])
+  @@map("concept_question_answers")
+}
+
+/// A pool item handed to one user.
+///
+/// Questions and exercises are a pool **shared per concept** — whatever
+/// anyone has generated is there for everyone, so the second person through a
+/// concept works the existing questions rather than paying to invent new
+/// ones. What is per-user is which of them you were handed, and that is what
+/// completion is measured against: the batches you actually pulled, not a
+/// pool that grows behind you for ever.
+model PracticeAssignment {
+  id        String  @id @default(cuid())
+  userId    String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conceptId String
+  concept   Concept @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+
+  /// Exactly one of these is set.
+  questionId String?
+  question   ConceptQuestion? @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  exerciseId String?
+  exercise   Exercise?        @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+
+  /// Which pull it arrived in, so the page can group and order batches.
+  batch    Int      @default(0)
+  servedAt DateTime @default(now())
+
+  /// Nothing is served to the same person twice. Postgres counts NULLs as
+  /// distinct, so the exercise rows do not collide on the question index.
+  @@unique([userId, questionId])
+  @@unique([userId, exerciseId])
+  @@index([userId, conceptId, batch])
+  @@map("practice_assignments")
+}
+
+// ===========================================================================
+// Roadmap (docs/learning-path.md)
+//
+// A roadmap is a *traversal* of the knowledge graph, never a copy of it.
+// RoadmapItem references conceptId and exerciseId; duplicating their content
+// here would orphan every skill record the moment a roadmap regenerates,
+// because skill history is keyed on concept ids.
+// ===========================================================================
+
+model Roadmap {
+  id              String        @id @default(cuid())
+  userId          String
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  version         Int           @default(1)
+  status          RoadmapStatus @default(ACTIVE)
+  /// "rules" or "ai" — the planner degrades to rules when AI is unavailable.
+  generatedBy     String        @default("rules")
+  /// Ordered technology slugs, so the intended journey survives a replan.
+  technologyOrder String[]      @default([])
+  totalMinutes    Int           @default(0)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  phases RoadmapPhase[]
+
+  @@unique([userId, version])
+  @@index([userId, status])
+  @@map("roadmaps")
+}
+
+model RoadmapPhase {
+  id               String   @id @default(cuid())
+  roadmapId        String
+  roadmap          Roadmap  @relation(fields: [roadmapId], references: [id], onDelete: Cascade)
+  orderIndex       Int
+  title            String
+  /// What the user should be able to do once this phase is finished.
+  goal             String   @default("")
+  technologyId     String?
+  estimatedMinutes Int      @default(0)
+  createdAt        DateTime @default(now())
+
+  items RoadmapItem[]
+
+  @@unique([roadmapId, orderIndex])
+  @@index([roadmapId, orderIndex])
+  @@map("roadmap_phases")
+}
+
+model RoadmapItem {
+  id         String            @id @default(cuid())
+  phaseId    String
+  phase      RoadmapPhase      @relation(fields: [phaseId], references: [id], onDelete: Cascade)
+  orderIndex Int
+  kind       RoadmapItemKind
+  status     RoadmapItemStatus @default(PENDING)
+
+  conceptId  String?
+  concept    Concept?  @relation(fields: [conceptId], references: [id])
+  exerciseId String?
+  exercise   Exercise? @relation(fields: [exerciseId], references: [id])
+
+  title            String
+  /// Why the planner placed this here. Shown to the user: an opaque path is
+  /// not a trusted path.
+  rationale        String    @default("")
+  estimatedMinutes Int       @default(15)
+  completedAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@unique([phaseId, orderIndex])
+  @@index([phaseId, orderIndex])
+  @@index([conceptId])
+  @@map("roadmap_items")
+}
+
+// ===========================================================================
+// Background generation
+//
+// State lives here rather than in Redis so "come back shortly" survives a
+// restart (§29). Redis carries work to the worker; this remembers what was
+// asked for and how far it got.
+// ===========================================================================
+
+model GenerationJob {
+  id         String           @id @default(cuid())
+  userId     String
+  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind       GenerationKind
+  /// Technology slug, roadmap id, or whatever the kind addresses.
+  target     String
+  status     GenerationStatus @default(QUEUED)
+  /// 0-100. Coarse on purpose; a precise fake percentage is worse than none.
+  progress   Int              @default(0)
+  /// Human-readable current step, shown while the user waits.
+  step       String           @default("")
+  attempts   Int              @default(0)
+  error      String?
+  startedAt  DateTime?
+  finishedAt DateTime?
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  @@index([userId, status])
+  @@index([status, createdAt])
+  @@map("generation_jobs")
+}
+
+// ===========================================================================
+// Interview (Phase 6 — modelled now so the skill model can feed it)
+// ===========================================================================
+
+model Interview {
+  id          String          @id @default(cuid())
+  userId      String
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mode        InterviewMode
+  status      String          @default("IN_PROGRESS")
+  startedAt   DateTime        @default(now())
+  endedAt     DateTime?
+  targetLevel InterviewTarget @default(MID)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  questions  InterviewQuestion[]
+  evaluation InterviewEvaluation?
+
+  @@index([userId, startedAt])
+  @@map("interviews")
+}
+
+model InterviewQuestion {
+  id             String    @id @default(cuid())
+  interviewId    String
+  interview      Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  conceptId      String?
+  concept        Concept?  @relation(fields: [conceptId], references: [id])
+  orderIndex     Int       @default(0)
+  prompt         String
+  /// DEEPEN | RECOVER | ESCALATE | PIN_DOWN | PIVOT — why the engine asked this.
+  move           String    @default("PIVOT")
+  depth          Int       @default(0)
+  /// What a strong answer would touch. Written when asked, read when grading.
+  expectedPoints String[]  @default([])
+  createdAt      DateTime  @default(now())
+
+  answer InterviewAnswer?
+
+  @@index([interviewId, orderIndex])
+  @@map("interview_questions")
+}
+
+model InterviewAnswer {
+  id          String            @id @default(cuid())
+  questionId  String            @unique
+  question    InterviewQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  text        String
+  correctness Float?
+  depth       Float?
+  specificity Float?
+  confidence  Float?
+  createdAt   DateTime          @default(now())
+
+  @@map("interview_answers")
+}
+
+model InterviewEvaluation {
+  id                   String    @id @default(cuid())
+  interviewId          String    @unique
+  interview            Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  overallScore         Float?
+  technicalCorrectness Float?
+  depth                Float?
+  problemSolving       Float?
+  communication        Float?
+  confidence           Float?
+  practicalKnowledge   Float?
+  architectureThinking Float?
+  debugging            Float?
+  codeQuality          Float?
+  tradeOffAwareness    Float?
+  strongAreas          String[]  @default([])
+  weakAreas            String[]  @default([])
+  recommendedTopics    String[]  @default([])
+  interviewReadiness   Float?
+  /// The debrief in prose. The scores say how much; this says what to do.
+  summary              String?
+  createdAt            DateTime  @default(now())
+
+  @@map("interview_evaluations")
+}
+
+// ===========================================================================
+// AI observability
+// ===========================================================================
+
+model AIInteraction {
+  id               String   @id @default(cuid())
+  userId           String?
+  user             User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  agent            String
+  model            String
+  /// Lets an evaluation-quality regression be traced to the prompt change that caused it.
+  promptVersion    String   @default("v1")
+  /// Hash rather than the raw prompt by default, for size. Raw capture is opt-in.
+  inputHash        String
+  promptTokens     Int      @default(0)
+  completionTokens Int      @default(0)
+  latencyMs        Int      @default(0)
+  outcome          String   @default("OK")
+  error            String?
+  createdAt        DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([agent, createdAt])
+  @@map("ai_interactions")
+}
+
+model TokenUsageDaily {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  day       DateTime @db.Date
+  tokens    Int      @default(0)
+  calls     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, day])
+  @@map("token_usage_daily")
+}
+
+// ===========================================================================
+// Enums
+// ===========================================================================
+
+enum UserTechnologyStatus {
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum Priority {
+  LOW
+  NORMAL
+  HIGH
+  CRITICAL
+}
+
+enum TargetProficiency {
+  AWARENESS
+  WORKING
+  PROFICIENT
+  EXPERT
+}
+
+enum LearningFrequency {
+  DAILY
+  FREQUENT
+  OCCASIONAL
+  RARE
+}
+
+enum PrerequisiteStrength {
+  HARD
+  SOFT
+}
+
+enum CurriculumStatus {
+  GENERATING
+  ACTIVE
+  SUPERSEDED
+  FAILED
+}
+
+enum ExerciseKind {
+  CODING
+  RECALL
+  DEBUGGING
+  BLIND_CODING
+  EXPLANATION
+  PROJECT
+  /// Phase 9. None of these three are graded by running the user's code:
+  /// a design and an incident diagnosis are prose, and a terminal scenario
+  /// is graded by replaying commands against the simulator.
+  SYSTEM_DESIGN
+  INCIDENT
+  TERMINAL
+}
+
+enum AttemptOutcome {
+  IN_PROGRESS
+  PASSED
+  FAILED
+  ABANDONED
+}
+
+enum ExecutionStatus {
+  PASSED
+  FAILED
+  COMPILE_ERROR
+  RUNTIME_ERROR
+  TIMEOUT
+  MEMORY_EXCEEDED
+  OUTPUT_EXCEEDED
+  HARNESS_ERROR
+  INTERNAL_ERROR
+}
+
+enum HintKind {
+  CONCEPT_REMINDER
+  SMALL_HINT
+  HINT
+  DEBUGGING_QUESTION
+  EXPLAIN_ERROR
+  SHOW_APPROACH
+  SHOW_SOLUTION
+}
+
+/// Which model vendor a call goes to. Stored per user, so switching vendor is
+/// a settings change rather than a redeploy.
+/// What a concept question asks for.
+///
+/// Both exist because they catch different failures. Multiple choice
+/// catches a missing distinction cheaply and at scale; a written answer
+/// catches the far more common case of recognising an idea while being
+/// unable to state it, which no list of options will ever reveal.
+enum ConceptQuestionKind {
+  MCQ
+  THEORY
+}
+
+enum RoutineItemKind {
+  LEARN
+  RECALL
+  CODE
+  BLIND_CODE
+  DEBUG
+  EXPLAIN
+  /// Mirrors RoadmapItemKind. A roadmap PROJECT or CHECKPOINT lands in a
+  /// routine unchanged, and without these the insert fails on the enum.
+  PROJECT
+  CHECKPOINT
+  REVIEW
+  INTERVIEW
+}
+
+enum RoutineItemStatus {
+  PENDING
+  IN_PROGRESS
+  DONE
+  /// Moved to a later day because it was not finished. Nothing is ever
+  /// dropped: the work is compulsory, so an unfinished day pushes forward
+  /// rather than disappearing.
+  CARRIED
+  /// Historical only. Skipping is no longer possible — see CARRIED.
+  SKIPPED
+}
+
+enum RoadmapStatus {
+  /// Skeleton written, content still generating behind the user.
+  BUILDING
+  ACTIVE
+  SUPERSEDED
+}
+
+enum RoadmapItemKind {
+  LEARN
+  RECALL
+  CODE
+  BLIND_CODE
+  DEBUG
+  EXPLAIN
+  PROJECT
+  CHECKPOINT
+  INTERVIEW
+}
+
+enum RoadmapItemStatus {
+  PENDING
+  IN_PROGRESS
+  DONE
+  SKIPPED
+  /// Content for this item has not finished generating yet.
+  AWAITING_CONTENT
+}
+
+enum GenerationKind {
+  ROADMAP_SKELETON
+  TECHNOLOGY_CURRICULUM
+  EXERCISES
+  INTERVIEW_QUESTIONS
+}
+
+enum GenerationStatus {
+  /// In the plan, waiting its turn. Not runnable and costs nothing.
+  ///
+  /// Distinct from QUEUED so the user can see the whole pipeline — "3 of 22
+  /// built, Git is next" — without those rows being something the runner
+  /// will pick up. Only the single technology whose turn it is becomes
+  /// QUEUED.
+  PENDING
+  QUEUED
+  RUNNING
+  /// Usable but incomplete. Four of six technologies is not "not ready".
+  PARTIAL
+  READY
+  FAILED
+}
+
+enum InterviewMode {
+  QUICK
+  TECHNICAL
+  CODING
+  DEBUGGING
+  SYSTEM_DESIGN
+  SENIOR
+}
+
+enum InterviewTarget {
+  JUNIOR
+  MID
+  SENIOR
+}
+
+enum PrimaryGoal {
+  CODING
+  INTERVIEW
+  JOB_PREPARATION
+  ENGINEERING_MASTERY
+}
+
+enum SkillEventCause {
+  EXERCISE_ATTEMPT
+  AI_EVALUATION
+  INTERVIEW
+  REVIEW
+  SELF_ASSESSMENT
+  DECAY
+  INITIAL_ESTIMATE
+  RECALCULATION
+}
+
+// ===========================================================================
+// Devices, sync and AI jobs (from Job Hunter's backend, plus the AI-job queue)
+// ===========================================================================
+
+enum DeviceKind {
+  DESKTOP
+  MOBILE
+}
+
+/// A desktop or phone signed in to an account. It holds an opaque device
+/// token (only its hash is stored) that the same auth guard accepts as a JWT.
+model Device {
+  id         String     @id @default(cuid())
+  userId     String
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind       DeviceKind
+  name       String
+  platform   String     @default("")
+  tokenHash  String     @unique
+  /// Firebase registration token of a phone, for push. Never returned by the API.
+  pushToken  String?
+  lastSeenAt DateTime?
+  createdAt  DateTime   @default(now())
+
+  aiJobs AiJob[]
+
+  @@index([userId])
+  @@map("devices")
+}
+
+/// A short-lived, single-use code the desktop shows as a QR code; a phone
+/// redeems it for a device token. Only its hash is stored.
+model PairingCode {
+  codeHash   String    @id
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt  DateTime
+  redeemedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("pairing_codes")
+}
 
 /// One document of the desktop's local-first store (jobs, applications,
 /// resumes, ...), as the Rust sync layer sends it. `collection` is one of the
@@ -60,4 +1385,41 @@ model SyncDocument {
   @@id([userId, collection, id])
   @@index([userId, collection, updatedAt])
   @@map("sync_documents")
+}
+
+enum AiJobStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+/// One AI call, run by the user's own desktop with its local Claude CLI.
+/// The server never runs AI: it writes the job, hands it to the desktop over
+/// the hub, and checks the answer against the agent's contract.
+model AiJob {
+  id            String      @id @default(cuid())
+  userId        String
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// The desktop that ran it; null while queued.
+  deviceId      String?
+  device        Device?     @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  /// The agent that asked (tutor, evaluator, curriculum, ...).
+  agent         String
+  promptVersion String      @default("v1")
+  model         String
+  status        AiJobStatus @default(QUEUED)
+  /// The job as sent: system prompt, conversation, JSON schema, model, timeout.
+  job           Json
+  /// What the CLI printed (its JSON envelope), once it ran.
+  output        String?
+  error         String?
+  createdAt     DateTime    @default(now())
+  startedAt     DateTime?
+  finishedAt    DateTime?
+
+  @@index([userId, status, createdAt])
+  @@index([status, createdAt])
+  @@map("ai_jobs")
 }

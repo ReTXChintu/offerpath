@@ -2,20 +2,24 @@
 
 Finds the jobs, gets you ready for the interviews, and moves you one step closer to the offer every day.
 
-Status: phase 0 (scaffold) done: every app builds, nothing works yet. The plan is in [docs/plan.md](docs/plan.md).
+Status: phase 1 (API) done: ForgeRoutine's API and learning packages, plus Job Hunter's devices, hub, sync and downloads, on one NestJS API and one Neon database. The plan is in [docs/plan.md](docs/plan.md); the device protocol in [docs/hub-protocol.md](docs/hub-protocol.md).
 
 ## Layout
 
-| Path                    | What                                                                       |
-| ----------------------- | -------------------------------------------------------------------------- |
-| `apps/api`              | NestJS API: REST under `/api/v1`, later the hub, downloads and the web app |
-| `apps/web`              | React 19 + Vite supporter web app                                          |
-| `apps/desktop`          | Tauri 2 + React 19 desktop app (`app.offerpath.desktop`)                   |
-| `apps/mobile`           | Flutter app (`app.offerpath.mobile`)                                       |
-| `apps/sandbox`          | Code-execution worker (placeholder until phase 1)                          |
-| `crates/offerpath-core` | Rust core (placeholder until phase 2)                                      |
-| `packages/config`       | The one validated read of the root `.env`                                  |
-| `packages/database`     | Prisma schema and migrations (Neon)                                        |
+| Path                                                       | What                                                                                                                     |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `apps/api`                                                 | NestJS API on 50005: REST under `/api/v1`, the device hub (`/api/v1/hub`), sync, downloads                               |
+| `apps/web`                                                 | React 19 + Vite supporter web app, on 50004                                                                              |
+| `apps/desktop`                                             | Tauri 2 + React 19 desktop app (`app.offerpath.desktop`)                                                                 |
+| `apps/mobile`                                              | Flutter app (`app.offerpath.mobile`)                                                                                     |
+| `apps/sandbox`                                             | Code-execution worker (BullMQ on Redis, for `EXECUTION_DRIVER=queue`)                                                    |
+| `crates/offerpath-core`                                    | Rust core (placeholder until phase 2)                                                                                    |
+| `packages/ai`                                              | Agent prompts, output contracts, the tutor's assistance policy, and the Claude provider (jobs run on the user's desktop) |
+| `packages/curriculum`                                      | Knowledge-graph algorithms and the seed curriculum                                                                       |
+| `packages/sandbox`, `packages/terminal`                    | Isolated code runner; simulated shell for engineering challenges                                                         |
+| `packages/types`, `packages/shared`, `packages/validation` | Shared types, pure logic, Zod schemas                                                                                    |
+| `packages/config`                                          | The one validated read of the root `.env`                                                                                |
+| `packages/database`                                        | Prisma schema, migrations, seed, Job Hunter import (Neon)                                                                |
 
 ## Requirements
 
@@ -30,6 +34,8 @@ pnpm dev                  # web on :50004 (proxies /api to the API), API on :500
 pnpm dev:desktop          # desktop app
 pnpm check                # everything CI runs: versions, format, typecheck, lint, tests, build, Rust, Flutter
 pnpm db:deploy            # apply migrations to the database in .env
+pnpm db:seed              # technology catalogue and curated curricula (a fresh database only)
+pnpm --filter @offerpath/api test:e2e   # API end to end, against TEST_DATABASE_URL
 ```
 
 ## Moving Job Hunter's data

@@ -1,22 +1,27 @@
 {
-  "name": "@offerpath/sandbox",
+  "name": "@offerpath/sandbox-worker",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Code-execution worker (BullMQ on the server's Redis). Ported from ForgeRoutine in phase 1.",
+  "main": "./dist/main.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsup",
+    "dev": "tsx watch src/main.ts",
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@offerpath/config": "workspace:*"
+    "@offerpath/config": "workspace:*",
+    "@offerpath/sandbox": "workspace:*",
+    "@offerpath/types": "workspace:*",
+    "bullmq": "^5.34.10"
   },
   "devDependencies": {
-    "@types/node": "^22.10.0",
-    "typescript": "^5.9.0",
-    "vitest": "^3.2.0"
+    "tsup": "^8.3.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
   }
 }

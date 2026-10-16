@@ -18,7 +18,7 @@ jobs:
       matrix:
         node: [22, 24]
     services:
-      # Phase 1's API tests run against this; the Prisma checks below already do.
+      # The API's end-to-end suites run against this.
       postgres:
         image: postgres:16-alpine
         env:
@@ -34,6 +34,11 @@ jobs:
     env:
       DATABASE_URL: postgresql://offerpath:offerpath@localhost:5432/offerpath_test?schema=public
       DIRECT_DATABASE_URL: postgresql://offerpath:offerpath@localhost:5432/offerpath_test?schema=public
+      # Boot-time validation requires these; they are not secrets in CI.
+      JWT_ACCESS_SECRET: ci-access-secret-0123456789abcdefghijklmnopqrstuv
+      JWT_REFRESH_SECRET: ci-refresh-secret-vutsrqponmlkjihgfedcba9876543210
+      REDIS_ENABLED: 'false'
+      EXECUTION_DRIVER: inline
     steps:
       - uses: actions/checkout@v4
       # No `version:`: package.json's `packageManager` is the single source of truth.
@@ -45,20 +50,30 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: node scripts/sync-versions.mjs --check
       - run: pnpm format:check
-      - name: Apply migrations
-        run: pnpm --filter @offerpath/database exec prisma migrate deploy
       - name: Migrations match the schema
-        # Catches a schema edit committed without its migration.
+        # Catches a schema edit committed without its migration. Uses the empty
+        # database as its shadow, so it runs before anything is applied.
         run: |
           pnpm --filter @offerpath/database exec prisma migrate diff \
             --from-migrations prisma/migrations \
             --to-schema-datamodel prisma/schema.prisma \
             --shadow-database-url "$DATABASE_URL" \
             --exit-code && echo "Schema and migrations agree"
+      - name: Apply migrations
+        run: pnpm --filter @offerpath/database exec prisma migrate deploy
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm build
+      - name: Seed the curriculum
+        run: pnpm --filter @offerpath/database exec tsx prisma/seed.ts
+      - name: API end to end
+        # The suites refuse to run when TEST_DATABASE_URL is the live database,
+        # so DATABASE_URL points elsewhere and the suite swaps in the test one.
+        env:
+          TEST_DATABASE_URL: postgresql://offerpath:offerpath@localhost:5432/offerpath_test?schema=public
+          DATABASE_URL: postgresql://offerpath:offerpath@localhost:5432/not_used?schema=public
+        run: pnpm --filter @offerpath/api exec jest --config ./test/jest-e2e.json --runInBand
 
   rust:
     name: Rust

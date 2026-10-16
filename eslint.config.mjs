@@ -41,4 +41,12 @@ export default tseslint.config(
       eqeqeq: ['error', 'always'],
     },
   },
+  {
+    // Nest resolves constructor dependencies from decorator metadata, so a class
+    // used only as a constructor parameter's type is still a runtime import.
+    files: ['apps/api/**/*.ts'],
+    languageOptions: {
+      parserOptions: { emitDecoratorMetadata: true, experimentalDecorators: true },
+    },
+  },
 );
