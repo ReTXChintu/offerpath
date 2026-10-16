@@ -13,6 +13,7 @@ export default tseslint.config(
       '**/coverage/**',
       '**/.turbo/**',
       'target/**',
+      '.claude/**',
       'apps/mobile/**',
       'apps/desktop/src-tauri/**',
       'packages/database/src/generated/**',

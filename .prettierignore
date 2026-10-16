@@ -11,3 +11,4 @@ apps/desktop/src-tauri/**
 crates/**
 packages/database/prisma/migrations/**
 docs/**
+.claude

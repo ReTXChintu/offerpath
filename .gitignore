@@ -44,3 +44,6 @@ coverage/
 
 # PM2 runtime files
 .pm2/
+
+# Claude Code worktrees and local state
+.claude/
