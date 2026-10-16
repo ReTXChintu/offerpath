@@ -15,11 +15,11 @@ void main() {
   });
 
   test('each link lands on its tab', () {
-    expect(tabFor(const AppLink(LinkKind.application, 'a')), tabApplications);
-    expect(tabFor(const AppLink(LinkKind.applications)), tabApplications);
-    expect(tabFor(const AppLink(LinkKind.jobs)), tabJobs);
+    expect(tabFor(const AppLink(LinkKind.application, 'a')), tabHunt);
+    expect(tabFor(const AppLink(LinkKind.applications)), tabHunt);
+    expect(tabFor(const AppLink(LinkKind.jobs)), tabHunt);
     expect(tabFor(const AppLink(LinkKind.jobSites)), tabMore);
-    expect(tabFor(const AppLink(LinkKind.home)), tabHome);
+    expect(tabFor(const AppLink(LinkKind.home)), tabToday);
   });
 
   test('local notification payloads round-trip, and old bare ids still open the application', () {

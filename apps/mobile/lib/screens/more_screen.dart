@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../learn/progress_page.dart';
 import '../state/auth_controller.dart';
 import '../state/queue_controller.dart';
 import '../state/update_controller.dart';
@@ -11,8 +12,8 @@ import 'job_sites_screen.dart';
 import 'queue_screen.dart';
 import 'settings_screen.dart';
 
-/// Everything else: the queue, job-site profiles, saved answers, settings,
-/// about.
+/// Everything else: progress, the queue, job-site profiles, saved answers,
+/// settings, about.
 class MoreScreen extends StatelessWidget {
   const MoreScreen({super.key});
 
@@ -44,7 +45,7 @@ class MoreScreen extends StatelessWidget {
               const SizedBox(width: 14),
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('Job Hunter', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+                  Text('Offerpath', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
                   Text(
                     (auth.accountEmail?.isNotEmpty ?? false) ? auth.accountEmail! : (auth.deviceName ?? ''),
                     maxLines: 1,
@@ -54,6 +55,11 @@ class MoreScreen extends StatelessWidget {
                 ]),
               ),
             ]),
+          ),
+          const SectionHeader('You'),
+          AppCard(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: tile(Icons.insights_outlined, Colors.green, 'Progress', 'Coding score, today, weakest skills, the hunt funnel', const ProgressPage()),
           ),
           const SectionHeader('Agent'),
           AppCard(
@@ -70,7 +76,7 @@ class MoreScreen extends StatelessWidget {
               const Divider(indent: 70),
               tile(Icons.language, Colors.indigo, 'Job sites', 'Keep your LinkedIn, Naukri and other profiles up to date', const JobSitesScreen()),
               const Divider(indent: 70),
-              tile(Icons.question_answer_outlined, Colors.teal, 'Additional details', 'Saved answers the agent reuses on application forms', const AnswersScreen()),
+              tile(Icons.question_answer_outlined, Colors.teal, 'Saved answers', 'Saved answers the agent reuses on application forms', const AnswersScreen()),
             ]),
           ),
           const SectionHeader('App'),

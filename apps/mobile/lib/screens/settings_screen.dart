@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../services/relay_client.dart';
+import '../services/hub_client.dart';
 import '../state/auth_controller.dart';
 import '../state/connection_controller.dart';
 import '../state/update_controller.dart';
@@ -32,7 +32,7 @@ class SettingsScreen extends StatelessWidget {
           ListTile(
             leading: const Icon(Icons.cloud_outlined),
             title: const Text('Server'),
-            subtitle: Text(auth.relayUrl ?? 'Not connected'),
+            subtitle: Text(auth.serverUrl ?? 'Not connected'),
           ),
           if (auth.accountEmail != null && auth.accountEmail!.isNotEmpty)
             ListTile(leading: const Icon(Icons.person_outline), title: const Text('Account'), subtitle: Text(auth.accountEmail!)),
@@ -64,7 +64,7 @@ class SettingsScreen extends StatelessWidget {
                   context: context,
                   builder: (ctx) => AlertDialog(
                     title: const Text('Sign out?'),
-                    content: const Text('This forgets this phone\'s sign-in locally. Your account and its data are unaffected.'),
+                    content: const Text('This signs this phone out of your account and forgets it here. Your account and its data are unaffected.'),
                     actions: [
                       TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
                       FilledButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Sign out')),
@@ -83,7 +83,7 @@ class SettingsScreen extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Text(
-              'This app only reviews and approves work your desktop agent already prepared. No AI runs here and no data is stored anywhere except your own server and this phone.',
+              'No AI runs on this phone: tutor answers, interview questions and the job hunt all run on your own desktop, with your own Claude. Approvals still go through the desktop’s own checks.',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
           ),

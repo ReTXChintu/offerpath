@@ -9,6 +9,7 @@ import 'state/applications_controller.dart';
 import 'state/auth_controller.dart';
 import 'state/connection_controller.dart';
 import 'state/jobs_controller.dart';
+import 'state/learning_controller.dart';
 import 'state/nav_controller.dart';
 import 'state/notifications_controller.dart';
 import 'state/profiles_controller.dart';
@@ -40,6 +41,7 @@ Future<void> main() async {
         ChangeNotifierProvider.value(value: auth),
         ChangeNotifierProvider(create: (_) => NavController()),
         ChangeNotifierProvider(create: (_) => UpdateController(auth), lazy: false),
+        ChangeNotifierProvider(create: (_) => LearningController(auth)),
         ChangeNotifierProxyProvider<AuthController, ConnectionController>(
           create: (_) => ConnectionController(auth),
           update: (_, auth, previous) => previous ?? ConnectionController(auth),
@@ -74,7 +76,7 @@ Future<void> main() async {
           update: (_, connection, previous) => previous ?? AnswersController(connection),
         ),
       ],
-      child: const JobHunterApp(),
+      child: const OfferpathApp(),
     ),
   );
 }

@@ -252,7 +252,7 @@ class Application {
       );
 }
 
-/// What `list_applications` (and the server's `/v1/applications`) returns:
+/// What `list_applications` (and the server's `/api/v1/applications`) returns:
 /// one row per application.
 class ApplicationListItem {
   final Application application;
@@ -272,7 +272,7 @@ List<ApplicationListItem> parseApplicationList(dynamic data) =>
     mapList(data).map(ApplicationListItem.fromJson).where((i) => i.application.id.isNotEmpty).toList();
 
 /// What `get_application` returns: the full review screen's worth of data.
-/// The server's `/v1/applications/:id` has the same shape without the
+/// The server's `/api/v1/applications/:id` has the same shape without the
 /// resume and cover letter.
 class ApplicationDetail {
   final Application application;

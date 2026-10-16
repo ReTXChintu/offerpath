@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -8,20 +7,21 @@ import 'package:workmanager/workmanager.dart';
 
 import '../logic/links.dart';
 import '../models/app_notification.dart';
+import 'api_client.dart';
 import 'link_bus.dart';
 import 'secure_store.dart';
 
-const _checkTask = 'job_hunter.check_notifications';
-const _alertedKey = 'job_hunter.notifications.alerted_at';
+const _checkTask = 'offerpath.check_notifications';
+const _alertedKey = 'offerpath.notifications.alerted_at';
 
 /// The Android channel every alert uses, including Firebase pushes shown by
 /// the system while the app is closed (see the manifest's
 /// `default_notification_channel_id`).
-const alertsChannelId = 'job_hunter_alerts';
+const alertsChannelId = 'offerpath_alerts';
 const _alertsChannel = AndroidNotificationChannel(
   alertsChannelId,
-  'Job Hunter alerts',
-  description: 'Finished job hunts, applications that need you, failures',
+  'Offerpath alerts',
+  description: 'Finished job hunts, applications that need you, interviews, failures',
   importance: Importance.high,
 );
 
@@ -99,21 +99,20 @@ class NotificationService {
   }
 
   /// Every notification on the server for this account, newest first.
-  static Future<List<AppNotification>> fetch(String baseUrl, String deviceToken) async {
-    final dio = Dio(BaseOptions(baseUrl: baseUrl, connectTimeout: const Duration(seconds: 15), receiveTimeout: const Duration(seconds: 15)));
-    final resp = await dio.get<Map<String, dynamic>>('/v1/data/notifications', options: Options(headers: {'Authorization': 'Bearer $deviceToken'}));
-    final docs = (resp.data?['documents'] as List? ?? const []).whereType<Map>().map((m) => m.cast<String, dynamic>());
-    return sortNewest(docs.map(AppNotification.fromJson));
+  static Future<List<AppNotification>> fetch(ApiClient api) async {
+    final data = await api.get('/data/notifications');
+    final docs = (data is Map ? data['documents'] as List? : null) ?? const [];
+    return sortNewest(docs.whereType<Map>().map((m) => AppNotification.fromJson(m.cast<String, dynamic>())));
   }
 
-  /// Fetch with the stored pairing and alert what's new. Used by the
+  /// Fetch with the stored sign-in and alert what's new. Used by the
   /// background task, where no controller is running.
   Future<List<AppNotification>> checkServer() async {
     final store = LocalStore();
-    final url = await store.relayUrl;
+    final url = await store.serverUrl;
     final token = await store.deviceToken;
     if (url == null || token == null) return const [];
-    final list = await fetch(url, token);
+    final list = await fetch(ApiClient(url, token: token));
     await alertFresh(list);
     return list;
   }

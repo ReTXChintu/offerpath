@@ -9,35 +9,52 @@ import '../services/secure_store.dart';
 
 enum AuthStatus { unknown, signedOut, signedIn }
 
-/// Owns sign-in/pairing/sign-out. Holds no job or application data -- see
-/// `ApplicationsController` for that. Mirrors the desktop's `RemoteClient`
-/// register/login/logout flow (`crates/job-hunter-core/src/remote/client.rs`):
-/// after the one register-or-pair call, only the device token is kept.
+/// Builds the API client for a server and token; replaced in tests.
+typedef ApiFactory = ApiClient Function(String serverUrl, {String? token});
+
+ApiClient _defaultApi(String serverUrl, {String? token}) => ApiClient(serverUrl, token: token);
+
+/// Owns sign-in, pairing and sign-out. Holds no hunt or learning data.
+/// After the one sign-in-or-pair call, only the device token is kept: the
+/// API accepts it everywhere a JWT works, so the password, access token and
+/// refresh token are never stored.
 class AuthController extends ChangeNotifier {
   final LocalStore _store;
-  AuthController({LocalStore? store}) : _store = store ?? LocalStore();
+  final ApiFactory _apiFactory;
+  AuthController({LocalStore? store, ApiFactory? apiFactory})
+      : _store = store ?? LocalStore(),
+        _apiFactory = apiFactory ?? _defaultApi;
 
   AuthStatus status = AuthStatus.unknown;
   bool isBusy = false;
   String? lastError;
 
-  String? relayUrl;
+  String? serverUrl;
   String? accountEmail;
   String? deviceName;
+  String? deviceId;
   String? deviceToken;
+
+  ApiClient? _api;
+
+  /// The API with this phone's device token; null while signed out.
+  ApiClient? get api => _api;
 
   Future<void> loadPersisted() async {
     final token = await _store.deviceToken;
-    relayUrl = await _store.relayUrl;
+    serverUrl = await _store.serverUrl;
     // The server address is fixed per build: if this phone signed in under
     // an older build's address, follow the current one.
-    if (hasBuiltInServer && relayUrl != null && relayUrl!.isNotEmpty) {
-      relayUrl = ApiClient.normalizeRelayUrl(kBuiltInServerUrl);
+    if (hasBuiltInServer && serverUrl != null && serverUrl!.isNotEmpty) {
+      serverUrl = normalizeServerUrl(kBuiltInServerUrl);
     }
     accountEmail = await _store.accountEmail;
     deviceName = await _store.deviceName;
+    deviceId = await _store.deviceId;
     deviceToken = token;
-    status = (token != null && token.isNotEmpty && relayUrl != null && relayUrl!.isNotEmpty) ? AuthStatus.signedIn : AuthStatus.signedOut;
+    final signedIn = token != null && token.isNotEmpty && serverUrl != null && serverUrl!.isNotEmpty;
+    _api = signedIn ? _apiFactory(serverUrl!, token: token) : null;
+    status = signedIn ? AuthStatus.signedIn : AuthStatus.signedOut;
     notifyListeners();
   }
 
@@ -52,68 +69,96 @@ class AuthController extends ChangeNotifier {
       return true;
     } catch (e) {
       isBusy = false;
-      lastError = e is RelayApiException ? e.message : e.toString();
+      lastError = e is ApiException ? e.message : e.toString();
       notifyListeners();
       return false;
     }
   }
 
-  Future<bool> signUp({required String relayUrl, required String email, required String password, required String deviceName}) => _authenticate(relayUrl: relayUrl, email: email, password: password, deviceName: deviceName, isRegister: true);
+  /// Creates an account, then registers this phone on it.
+  Future<bool> signUp({required String serverUrl, required String displayName, required String email, required String password, required String deviceName}) =>
+      _authenticate(serverUrl: serverUrl, email: email, password: password, deviceName: deviceName, displayName: displayName);
 
-  Future<bool> signIn({required String relayUrl, required String email, required String password, required String deviceName}) => _authenticate(relayUrl: relayUrl, email: email, password: password, deviceName: deviceName, isRegister: false);
+  /// Signs in with email and password, then registers this phone.
+  Future<bool> signIn({required String serverUrl, required String email, required String password, required String deviceName}) =>
+      _authenticate(serverUrl: serverUrl, email: email, password: password, deviceName: deviceName);
 
-  Future<bool> _authenticate({required String relayUrl, required String email, required String password, required String deviceName, required bool isRegister}) {
+  Future<bool> _authenticate({required String serverUrl, required String email, required String password, required String deviceName, String? displayName}) {
     return _run(() async {
-      final url = ApiClient.normalizeRelayUrl(relayUrl);
-      final api = ApiClient(url);
-      final accessToken = isRegister ? await api.register(email.trim(), password) : await api.login(email.trim(), password);
-      final device = await api.registerDevice(accessToken: accessToken, name: deviceName.trim().isEmpty ? _defaultDeviceName() : deviceName.trim(), platform: _platform());
-      await _store.setDeviceToken(device.deviceToken);
-      await _store.savePairing(relayUrl: url, accountEmail: email.trim(), deviceName: deviceName.trim().isEmpty ? _defaultDeviceName() : deviceName.trim());
-      this.relayUrl = url;
-      accountEmail = email.trim();
-      this.deviceName = deviceName.trim().isEmpty ? _defaultDeviceName() : deviceName.trim();
-      deviceToken = device.deviceToken;
-      status = AuthStatus.signedIn;
+      final url = normalizeServerUrl(serverUrl);
+      final api = _apiFactory(url);
+      final name = _nameOrDefault(deviceName);
+      final tokens = displayName == null ? await api.login(email.trim(), password) : await api.register(email.trim(), password, displayName.trim());
+      final device = await api.registerDevice(accessToken: tokens.accessToken, name: name, platform: _platform());
+      await _signedIn(url, device, email: email.trim(), name: name);
     });
   }
 
-  /// Pairs with a one-time code minted on the desktop -- no password typed
-  /// here at all.
-  Future<bool> pairWithCode({required String relayUrl, required String code, required String deviceName}) {
+  /// Pairs with a one-time code from the desktop (scanned or typed): no
+  /// password on the phone at all.
+  Future<bool> pairWithCode({required String serverUrl, required String code, required String deviceName}) {
     return _run(() async {
-      final url = ApiClient.normalizeRelayUrl(relayUrl);
-      final api = ApiClient(url);
-      final name = deviceName.trim().isEmpty ? _defaultDeviceName() : deviceName.trim();
-      final device = await api.redeemPairingCode(code: code.trim().toUpperCase(), name: name, platform: _platform());
-      await _store.setDeviceToken(device.deviceToken);
-      await _store.savePairing(relayUrl: url, accountEmail: '', deviceName: name);
-      this.relayUrl = url;
-      accountEmail = '';
-      this.deviceName = name;
-      deviceToken = device.deviceToken;
-      status = AuthStatus.signedIn;
+      final url = normalizeServerUrl(serverUrl);
+      final name = _nameOrDefault(deviceName);
+      final device = await _apiFactory(url).redeemPairingCode(code: code.trim().toUpperCase(), name: name, platform: _platform());
+      await _signedIn(url, device, email: '', name: name);
     });
   }
 
-  /// Forgets this phone's credentials locally. The device entry itself
-  /// stays valid on the relay until revoked from the desktop's Paired
-  /// Devices list (or re-paired over); this matches "sign out" rather than
-  /// "revoke" -- the same distinction the desktop draws.
+  Future<void> _signedIn(String url, DeviceRegistration device, {required String email, required String name}) async {
+    await _store.setDeviceToken(device.deviceToken);
+    await _store.saveDevice(serverUrl: url, accountEmail: email, deviceName: name, deviceId: device.deviceId);
+    serverUrl = url;
+    accountEmail = email;
+    deviceName = name;
+    deviceId = device.deviceId;
+    deviceToken = device.deviceToken;
+    _api = _apiFactory(url, token: device.deviceToken);
+    status = AuthStatus.signedIn;
+  }
+
+  /// Signs this phone out: stops pushes, signs the device out on the server
+  /// (best effort: offline, it still forgets the token here) and forgets it.
   Future<void> signOut() async {
     isBusy = true;
     notifyListeners();
-    // Stop pushes to this phone while its device token still works.
-    await PushService.instance.unregister(relayUrl, deviceToken);
+    // Both authenticate with the device token, so they go first.
+    await PushService.instance.unregister(_api);
+    final api = _api, id = deviceId;
+    if (api != null && id != null && id.isNotEmpty) {
+      try {
+        await api.revokeDevice(id);
+      } catch (e) {
+        debugPrint('could not sign this device out on the server: $e');
+      }
+    }
+    await _forget();
+  }
+
+  /// The server refused this phone's token (revoked from the desktop or the
+  /// web): forget it locally, nothing to tell the server.
+  Future<void> handleRevoked() async {
+    if (status != AuthStatus.signedIn) return;
+    await PushService.instance.unregister(null);
+    lastError = 'This phone was signed out from another device. Pair or sign in again.';
+    await _forget(keepError: true);
+  }
+
+  Future<void> _forget({bool keepError = false}) async {
     await _store.clearAll();
-    relayUrl = null;
+    serverUrl = null;
     accountEmail = null;
     deviceName = null;
+    deviceId = null;
     deviceToken = null;
+    _api = null;
+    if (!keepError) lastError = null;
     status = AuthStatus.signedOut;
     isBusy = false;
     notifyListeners();
   }
+
+  String _nameOrDefault(String name) => name.trim().isEmpty ? _defaultDeviceName() : name.trim();
 
   String _platform() {
     if (kIsWeb) return 'web';

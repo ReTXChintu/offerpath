@@ -64,7 +64,7 @@ class AboutScreen extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Job Hunter', style: theme.textTheme.titleLarge),
+                    Text('Offerpath', style: theme.textTheme.titleLarge),
                     Text(pkg == null ? '' : 'Version ${pkg.version} (build ${pkg.buildNumber})', style: TextStyle(color: theme.colorScheme.onSurfaceVariant)),
                   ],
                 ),
@@ -134,7 +134,7 @@ class UpdateBanner extends StatelessWidget {
               Icon(Icons.system_update, color: scheme.onPrimaryContainer),
               const SizedBox(width: 12),
               Expanded(
-                child: Text('Job Hunter ${latest.version} is available', style: TextStyle(color: scheme.onPrimaryContainer, fontWeight: FontWeight.w600)),
+                child: Text('Offerpath ${latest.version} is available', style: TextStyle(color: scheme.onPrimaryContainer, fontWeight: FontWeight.w600)),
               ),
               TextButton(
                 onPressed: () async {

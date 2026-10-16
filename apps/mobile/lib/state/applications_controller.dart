@@ -19,7 +19,7 @@ import 'data_source.dart';
 /// Reads come from the desktop when it's online, else from what it last
 /// synced to the server.
 class ApplicationsController extends ChangeNotifier {
-  static const _cacheKey = 'job_hunter.applications_cache.v2';
+  static const _cacheKey = 'offerpath.applications_cache.v2';
 
   final ConnectionController connection;
   StreamSubscription? _changedSub;
@@ -93,7 +93,7 @@ class ApplicationsController extends ChangeNotifier {
     var from = DataSource.desktop;
     if (data is! List) {
       // With the desktop offline, read what it last synced to the server.
-      data = await connection.serverGet('/v1/applications');
+      data = await connection.serverGet('/applications');
       from = DataSource.server;
     }
     if (data is List) {
@@ -127,7 +127,7 @@ class ApplicationsController extends ChangeNotifier {
       lastDetailError = null;
       return ApplicationDetail.fromJson((resp.data as Map).cast<String, dynamic>());
     }
-    final data = await connection.serverGet('/v1/applications/${Uri.encodeComponent(applicationId)}');
+    final data = await connection.serverGet('/applications/${Uri.encodeComponent(applicationId)}');
     if (data is Map && data['application'] is Map) {
       lastDetailFromServer = true;
       lastDetailError = null;

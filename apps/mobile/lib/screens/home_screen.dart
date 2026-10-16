@@ -3,11 +3,13 @@ import 'package:provider/provider.dart';
 
 import '../logic/filters.dart';
 import '../logic/labels.dart';
+import '../logic/links.dart';
 import '../models/application.dart';
 import '../models/envelope.dart';
 import '../state/agent_controller.dart';
 import '../state/applications_controller.dart';
 import '../state/connection_controller.dart';
+import '../state/learning_controller.dart';
 import '../state/nav_controller.dart';
 import '../state/queue_controller.dart';
 import '../theme/theme.dart';
@@ -17,8 +19,9 @@ import '../widgets/presence_banner.dart';
 import 'application_detail_screen.dart';
 import 'queue_screen.dart';
 
-/// The Home tab: what the agent is doing and what's queued behind it, what's
-/// waiting on you, the numbers, and everything the desktop can be asked to
+/// The Today tab (plan section 5.4): the daily plan (today's learning,
+/// interviews coming up, what's waiting on you), the agent panel and what's
+/// queued behind it, the numbers, and everything the desktop can be asked to
 /// start from here.
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -27,7 +30,8 @@ class HomeScreen extends StatelessWidget {
     final apps = context.read<ApplicationsController>();
     final agent = context.read<AgentController>();
     final queue = context.read<QueueController>();
-    await Future.wait([apps.refresh(), agent.refreshStatus(), queue.refresh()]);
+    final learning = context.read<LearningController>();
+    await Future.wait([apps.refresh(), agent.refreshStatus(), queue.refresh(), learning.refresh()]);
   }
 
   @override
@@ -45,6 +49,7 @@ class HomeScreen extends StatelessWidget {
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 28),
               sliver: SliverList.list(children: const [
+                _TodayLearning(),
                 _QueueCard(),
                 _UpcomingInterviews(),
                 _WaitingOnYou(),
@@ -84,7 +89,7 @@ class _Hero extends StatelessWidget {
           Row(children: [
             const BrandLogo(size: 28),
             const SizedBox(width: 10),
-            const Expanded(child: Text('Job Hunter', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 17, letterSpacing: -0.2))),
+            const Expanded(child: Text('Offerpath', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 17, letterSpacing: -0.2))),
             const ConnectionPill(onDark: true),
           ]),
           const SizedBox(height: 18),
@@ -180,6 +185,79 @@ class _AgentPanel extends StatelessWidget {
           ],
         ],
       ),
+    );
+  }
+}
+
+/// Today's learning: the routine's progress and the next item, or reviews
+/// due. Opens Learn.
+class _TodayLearning extends StatefulWidget {
+  const _TodayLearning();
+
+  @override
+  State<_TodayLearning> createState() => _TodayLearningState();
+}
+
+class _TodayLearningState extends State<_TodayLearning> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final learning = context.read<LearningController>();
+      if (!learning.loadedOnce) learning.refresh();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final learning = context.watch<LearningController>();
+    final nav = context.read<NavController>();
+    final theme = Theme.of(context);
+    final routine = learning.routine;
+    final next = learning.nextItem;
+    final String title;
+    final String subtitle;
+    if (routine != null) {
+      title = routine.isFinished ? "Today's learning is done" : '${routine.completedMinutes} of ${routine.totalMinutes} minutes';
+      subtitle = [
+        if (next != null) 'Next: ${next.title}',
+        if (learning.recallDue > 0) '${learning.recallDue} due for review',
+      ].join(' · ');
+    } else if (learning.error != null) {
+      title = "Couldn't load today's learning";
+      subtitle = learning.error!;
+    } else if (learning.loading && !learning.loadedOnce) {
+      title = "Loading today's learning…";
+      subtitle = '';
+    } else {
+      title = 'Nothing planned yet';
+      subtitle = learning.recallDue > 0 ? '${learning.recallDue} due for review · plan today in Learn' : 'Plan today in Learn';
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SectionHeader('Learn today', action: TextButton(onPressed: () => nav.openLearn(), child: const Text('Open'))),
+        AppCard(
+          onTap: () => nav.openLearn(routine == null && learning.recallDue > 0 ? learnRecall : learnRoutine),
+          padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+          child: Row(children: [
+            IconBubble(Icons.school_outlined, color: theme.colorScheme.primary, size: 38),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(title, style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+                if (subtitle.isNotEmpty) Text(subtitle, maxLines: 2, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                if (routine != null) ...[
+                  const SizedBox(height: 8),
+                  LinearProgressIndicator(value: routine.progress, minHeight: 5),
+                ],
+              ]),
+            ),
+            Icon(Icons.chevron_right, color: theme.colorScheme.onSurfaceVariant),
+          ]),
+        ),
+      ],
     );
   }
 }
@@ -394,7 +472,7 @@ class _Actions extends StatelessWidget {
     final url = await textConfirmDialog(
       context,
       title: 'Apply from a link',
-      message: 'Paste a job link from any site Job Hunter knows. Your desktop opens it, prepares the resume, then approves and applies.',
+      message: 'Paste a job link from any site Offerpath knows. Your desktop opens it, prepares the resume, then approves and applies.',
       label: 'Job link',
       hint: 'https://…',
       confirm: 'Start',

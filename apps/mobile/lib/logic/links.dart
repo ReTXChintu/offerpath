@@ -58,14 +58,19 @@ AppLink? decodeLinkPayload(String? payload) {
 /// A Firebase message's `data` map (string values; empty means absent).
 AppLink linkFromPushData(Map<String, dynamic> data) => resolveLink(data['linkPage']?.toString(), data['linkId']?.toString());
 
-/// Tab order in the signed-in shell.
-const tabHome = 0, tabApplications = 1, tabJobs = 2, tabAlerts = 3, tabMore = 4;
+/// Tab order in the signed-in shell (plan section 5.4).
+const tabToday = 0, tabLearn = 1, tabHunt = 2, tabAlerts = 3, tabMore = 4;
 
-/// The tab a link lands on (an application detail opens over Applications,
-/// job sites over More).
+/// The Hunt tab's two pages.
+const huntApplications = 0, huntJobs = 1;
+
+/// The Learn tab's pages.
+const learnRoutine = 0, learnRecall = 1, learnInterviews = 2, learnReading = 3;
+
+/// The tab a link lands on (an application detail opens over Hunt, job
+/// sites over More).
 int tabFor(AppLink link) => switch (link.kind) {
-      LinkKind.application || LinkKind.applications => tabApplications,
-      LinkKind.jobs => tabJobs,
+      LinkKind.application || LinkKind.applications || LinkKind.jobs => tabHunt,
       LinkKind.jobSites => tabMore,
-      LinkKind.home => tabHome,
+      LinkKind.home => tabToday,
     };

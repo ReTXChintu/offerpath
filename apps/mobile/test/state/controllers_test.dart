@@ -21,7 +21,7 @@ void main() {
   test('applications fall back to the server when the desktop is offline', () async {
     final fake = FakeConnectionController(AuthController());
     fake.stubbed['list_applications'] = _offline;
-    fake.serverData['/v1/applications'] = [
+    fake.serverData['/applications'] = [
       {
         'application': {'id': 'a1', 'status': 'APPLIED', 'replies': [{'subject': 'Thanks'}]},
         'job': {'id': 'j1', 'title': 'Engineer'},
@@ -68,7 +68,7 @@ void main() {
     expect(jobs.items.single.job.isEmailPost, isTrue);
 
     fake.stubbed['list_jobs'] = _offline;
-    fake.serverData['/v1/data/jobs'] = {
+    fake.serverData['/data/jobs'] = {
       'documents': [
         {'id': 'j2', 'title': 'B'},
       ],
@@ -128,7 +128,7 @@ void main() {
     expect(fake.calls.firstWhere((c) => c.type == 'sync_platform_profile').payload, {'platform': 'LinkedIn', 'resume': true});
 
     fake.stubbed['list_answers'] = _offline;
-    fake.serverData['/v1/data/application_answers'] = {
+    fake.serverData['/data/application_answers'] = {
       'documents': [
         {'id': 'b', 'question': 'Notice period?', 'answer': '30 days'},
         {'id': 'a', 'question': 'current CTC?', 'answer': '12 LPA'},

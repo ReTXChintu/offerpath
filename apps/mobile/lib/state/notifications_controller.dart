@@ -14,7 +14,7 @@ import 'connection_controller.dart';
 /// the app is running (WebSocket or Firebase). Catches up whenever the app
 /// comes back to the foreground or the connection returns.
 class NotificationsController extends ChangeNotifier with WidgetsBindingObserver {
-  static const _seenKey = 'job_hunter.notifications.seen_at';
+  static const _seenKey = 'offerpath.notifications.seen_at';
 
   final AuthController auth;
   final ConnectionController connection;
@@ -57,8 +57,8 @@ class NotificationsController extends ChangeNotifier with WidgetsBindingObserver
       } catch (e) {
         debugPrint('could not enable notifications: $e');
       }
-      final url = auth.relayUrl, token = auth.deviceToken;
-      if (url != null && token != null) unawaited(PushService.instance.register(url, token));
+      final api = auth.api;
+      if (api != null) unawaited(PushService.instance.register(api));
       await refresh();
     } else if (!signedIn && _enabled) {
       _enabled = false;
@@ -69,13 +69,12 @@ class NotificationsController extends ChangeNotifier with WidgetsBindingObserver
   }
 
   Future<void> refresh() async {
-    final url = auth.relayUrl;
-    final token = auth.deviceToken;
-    if (url == null || token == null) return;
+    final api = auth.api;
+    if (api == null) return;
     loading = true;
     notifyListeners();
     try {
-      items = await NotificationService.fetch(url, token);
+      items = await NotificationService.fetch(api);
       error = null;
       await NotificationService.instance.alertFresh(items);
     } catch (e) {

@@ -7,14 +7,14 @@ import '../config.dart';
 import '../services/update_service.dart';
 import 'auth_controller.dart';
 
-/// Checks the Job Hunter server for a newer APK when the app starts and
+/// Checks the Offerpath server for a newer APK when the app starts and
 /// whenever it comes back to the foreground (at most every 6 hours unless
 /// asked). Installing is Android's own flow: "Download" opens the APK URL in
 /// the browser, and tapping the finished download installs it over this
 /// app, keeping its data (as long as both builds share a signing key).
 class UpdateController extends ChangeNotifier with WidgetsBindingObserver {
   static const _autoCheckEvery = Duration(hours: 6);
-  static const _dismissedKey = 'job_hunter.update_dismissed';
+  static const _dismissedKey = 'offerpath.update_dismissed';
   /// "Later" hides the banner for this long, then it comes back.
   static const _remindAfter = Duration(days: 3);
 
@@ -44,7 +44,7 @@ class UpdateController extends ChangeNotifier with WidgetsBindingObserver {
   int get currentBuild => int.tryParse(package?.buildNumber ?? '') ?? 0;
 
   /// The server the app talks to: the one built in, else the one signed in to.
-  String? get serverUrl => hasBuiltInServer ? kBuiltInServerUrl : _auth.relayUrl;
+  String? get serverUrl => hasBuiltInServer ? kBuiltInServerUrl : _auth.serverUrl;
 
   /// Show the home-screen banner (the About screen shows updates regardless).
   bool get showBanner {

@@ -19,8 +19,8 @@ class FakeUpdateService extends UpdateService {
 
 Future<UpdateController> pumpWith(WidgetTester tester, Widget child) async {
   SharedPreferences.setMockInitialValues({});
-  PackageInfo.setMockInitialValues(appName: 'Job Hunter', packageName: 'io.jobhunter.job_hunter_mobile', version: '0.1.0', buildNumber: '3', buildSignature: '');
-  final auth = AuthController()..relayUrl = 'http://10.0.0.5:8788';
+  PackageInfo.setMockInitialValues(appName: 'Offerpath', packageName: 'app.offerpath.mobile', version: '0.1.0', buildNumber: '3', buildSignature: '');
+  final auth = AuthController()..serverUrl = 'http://10.0.0.5:8788';
   final updates = UpdateController(auth, service: FakeUpdateService());
   await tester.pumpWidget(ChangeNotifierProvider.value(value: updates, child: MaterialApp(home: child)));
   await tester.pumpAndSettle();
@@ -30,14 +30,14 @@ Future<UpdateController> pumpWith(WidgetTester tester, Widget child) async {
 void main() {
   testWidgets('the banner announces a newer build and "Later" hides it', (tester) async {
     await pumpWith(tester, const Scaffold(body: Column(children: [UpdateBanner()])));
-    expect(find.text('Job Hunter 0.2.0 is available'), findsOneWidget);
+    expect(find.text('Offerpath 0.2.0 is available'), findsOneWidget);
     expect(find.text('Download'), findsOneWidget);
 
     await tester.tap(find.byTooltip('Later'));
     await tester.pumpAndSettle();
-    expect(find.text('Job Hunter 0.2.0 is available'), findsNothing);
+    expect(find.text('Offerpath 0.2.0 is available'), findsNothing);
     final prefs = await SharedPreferences.getInstance();
-    expect(prefs.getString('job_hunter.update_dismissed'), startsWith('0.2.0|'));
+    expect(prefs.getString('offerpath.update_dismissed'), startsWith('0.2.0|'));
   });
 
   testWidgets('About shows the installed version, the server, and the available update', (tester) async {

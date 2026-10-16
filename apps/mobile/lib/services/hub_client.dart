@@ -3,21 +3,31 @@ import 'dart:math';
 
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import '../config.dart';
 import '../models/envelope.dart';
 
 enum SocketState { disconnected, connecting, connected }
 
-/// Owns the one WebSocket to the relay: connects with `?token=<deviceToken>`,
-/// reconnects with backoff on any drop, resolves `request()` calls against
-/// matching `response` frames, and exposes pushes (`presence`, `changed`,
-/// `agent_status`) as a stream. Pure transport -- it never interprets
-/// `payload` beyond routing by `type`/`id`, matching the relay's own "dumb
-/// pipe" design (see `docs/mobile-protocol.md`).
-class RelayClient {
-  final String relayUrl;
-  final String deviceToken;
+/// Close code the API uses for a bad or revoked device token.
+const hubCloseUnauthorized = 4401;
 
-  RelayClient({required this.relayUrl, required this.deviceToken});
+/// Opens a WebSocket; replaced in tests.
+typedef SocketConnector = WebSocketChannel Function(Uri uri);
+
+/// Owns the one WebSocket to the API's hub (`/api/v1/hub?token=<deviceToken>`,
+/// see `docs/hub-protocol.md`): reconnects with backoff on any drop, resolves
+/// `request()` calls against matching `response` frames, and exposes pushes
+/// (`presence`, `changed`, `notification`, `agent_status`) as a stream. Pure
+/// transport: it never interprets `payload` beyond routing by `type`/`id`.
+///
+/// A close with code 4401 means this phone was signed out (revoked from the
+/// desktop or the web): it stops reconnecting and fires [signedOut].
+class HubClient {
+  final String serverUrl;
+  final String deviceToken;
+  final SocketConnector _connector;
+
+  HubClient({required this.serverUrl, required this.deviceToken, SocketConnector? connector}) : _connector = connector ?? WebSocketChannel.connect;
 
   WebSocketChannel? _channel;
   StreamSubscription? _sub;
@@ -27,18 +37,18 @@ class RelayClient {
 
   final _stateController = StreamController<SocketState>.broadcast();
   final _pushController = StreamController<Envelope>.broadcast();
+  final _signedOutController = StreamController<void>.broadcast();
   final _pending = <String, Completer<RelayResponse>>{};
 
   Stream<SocketState> get state => _stateController.stream;
   Stream<Envelope> get pushes => _pushController.stream;
+
+  /// The server closed the socket with 4401: this device token is no good.
+  Stream<void> get signedOut => _signedOutController.stream;
   SocketState _current = SocketState.disconnected;
   SocketState get currentState => _current;
 
-  String get _wsUrl {
-    final withoutScheme = relayUrl.replaceFirst(RegExp(r'^https?://'), '');
-    final scheme = relayUrl.startsWith('https://') ? 'wss' : 'ws';
-    return '$scheme://$withoutScheme/v1/ws?token=$deviceToken';
-  }
+  Uri get uri => hubUri(serverUrl, deviceToken);
 
   void connect() {
     _closed = false;
@@ -49,14 +59,13 @@ class RelayClient {
     if (_closed) return;
     _setState(SocketState.connecting);
     try {
-      final channel = WebSocketChannel.connect(Uri.parse(_wsUrl));
+      final channel = _connector(uri);
       _channel = channel;
-      _sub = channel.stream.listen(_onFrame, onDone: _onClosed, onError: (_) => _onClosed(), cancelOnError: true);
-      // web_socket_channel's `ready` future completes once the handshake
-      // succeeds; ignore its error here since onError/onDone already
-      // handle a failed connection the same way.
+      _sub = channel.stream.listen(_onFrame, onDone: () => _onClosed(channel), onError: (_) => _onClosed(channel), cancelOnError: true);
+      // `ready` completes once the handshake succeeds; its error is handled
+      // by onError/onDone the same way as any other drop.
       channel.ready.then((_) {
-        if (!_closed) {
+        if (!_closed && identical(_channel, channel)) {
           _setState(SocketState.connected);
           _backoff = const Duration(seconds: 1);
         }
@@ -83,16 +92,21 @@ class RelayClient {
     _pushController.add(env);
   }
 
-  void _onClosed() {
+  void _onClosed(WebSocketChannel channel) {
+    if (!identical(_channel, channel)) return;
+    final code = channel.closeCode;
     _sub?.cancel();
     _sub = null;
     _channel = null;
-    if (_closed) {
-      _setState(SocketState.disconnected);
+    _setState(SocketState.disconnected);
+    if (_closed) return;
+    _failAllPending('NOT_CONNECTED', 'Lost the connection to the server.');
+    if (code == hubCloseUnauthorized) {
+      // Revoked: reconnecting with the same token would only be refused again.
+      _closed = true;
+      _signedOutController.add(null);
       return;
     }
-    _setState(SocketState.disconnected);
-    _failAllPending('NOT_CONNECTED', 'Lost the connection to the server.');
     _scheduleReconnect();
   }
 
@@ -104,7 +118,7 @@ class RelayClient {
 
   void _setState(SocketState s) {
     _current = s;
-    _stateController.add(s);
+    if (!_stateController.isClosed) _stateController.add(s);
   }
 
   /// Sends a request and resolves once the matching `response` arrives, or
@@ -141,9 +155,11 @@ class RelayClient {
     _reconnectTimer?.cancel();
     _sub?.cancel();
     _channel?.sink.close();
+    _channel = null;
     _failAllPending('CLOSED', 'Disconnected.');
     _stateController.close();
     _pushController.close();
+    _signedOutController.close();
   }
 }
 

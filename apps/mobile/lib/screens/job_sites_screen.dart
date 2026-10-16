@@ -129,7 +129,7 @@ class _PlatformCardState extends State<_PlatformCard> {
           ]),
           const SizedBox(height: 4),
           Text(
-            p.lastSyncedAt != null ? 'Last updated ${formatDateTime(context, p.lastSyncedAt)} (${timeAgo(p.lastSyncedAt)})' : 'Never updated from Job Hunter',
+            p.lastSyncedAt != null ? 'Last updated ${formatDateTime(context, p.lastSyncedAt)} (${timeAgo(p.lastSyncedAt)})' : 'Never updated from Offerpath',
             style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
           ),
           if (p.autoSync) Text('Updates automatically when your profile changes', style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),

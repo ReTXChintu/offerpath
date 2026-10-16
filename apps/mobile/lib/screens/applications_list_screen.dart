@@ -17,7 +17,10 @@ import 'application_detail_screen.dart';
 /// searchable, most recently updated first. Approve/reject happen in the
 /// detail screen, never on a stray swipe here.
 class ApplicationsListScreen extends StatefulWidget {
-  const ApplicationsListScreen({super.key});
+  const ApplicationsListScreen({this.embedded = false, super.key});
+
+  /// Shown as a page of the Hunt tab, under its app bar.
+  final bool embedded;
 
   @override
   State<ApplicationsListScreen> createState() => _ApplicationsListScreenState();
@@ -97,7 +100,7 @@ class _ApplicationsListScreenState extends State<ApplicationsListScreen> {
     }
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Applications')),
+      appBar: widget.embedded ? null : AppBar(title: const Text('Applications')),
       body: Column(
         children: [
           const PresenceBanner(),

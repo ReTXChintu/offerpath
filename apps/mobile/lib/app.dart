@@ -11,14 +11,14 @@ import 'theme/theme.dart';
 /// sign-in/pairing screen, signed in shows the review shell. There is no
 /// public route that skips this -- every screen past the login screen
 /// assumes a live device token.
-class JobHunterApp extends StatefulWidget {
-  const JobHunterApp({super.key});
+class OfferpathApp extends StatefulWidget {
+  const OfferpathApp({super.key});
 
   @override
-  State<JobHunterApp> createState() => _JobHunterAppState();
+  State<OfferpathApp> createState() => _OfferpathAppState();
 }
 
-class _JobHunterAppState extends State<JobHunterApp> {
+class _OfferpathAppState extends State<OfferpathApp> {
   late final GoRouter _router;
 
   @override
@@ -56,7 +56,7 @@ class _JobHunterAppState extends State<JobHunterApp> {
     }
 
     return MaterialApp.router(
-      title: 'Job Hunter',
+      title: 'Offerpath',
       debugShowCheckedModeBanner: false,
       theme: buildTheme(Brightness.light),
       darkTheme: buildTheme(Brightness.dark),

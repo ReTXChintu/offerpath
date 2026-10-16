@@ -90,7 +90,7 @@ class AnswersController extends ChangeNotifier {
       source = DataSource.desktop;
       error = null;
     } else {
-      final data = await connection.serverGet('/v1/data/application_answers');
+      final data = await connection.serverGet('/data/application_answers');
       if (data is Map) {
         items = _sorted(mapList(data['documents']).map(AnswerRecord.fromJson));
         source = DataSource.server;

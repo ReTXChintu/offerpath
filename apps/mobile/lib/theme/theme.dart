@@ -1,21 +1,22 @@
 import 'package:flutter/material.dart';
 
-/// Matches the desktop app's brand indigo (`apps/desktop/src/theme.ts`) so
-/// the two feel like one product.
-const brandSeed = Color(0xFF4F46E5);
-const _brandDeep = Color(0xFF3730A3);
-const _brandBright = Color(0xFF6366F1);
+/// Offerpath's brand blue and gold (`assets/logo.svg`), shared with the
+/// desktop and web apps so the three feel like one product.
+const brandSeed = Color(0xFF1F4FD8);
+const brandGold = Color(0xFFFFD34D);
+const _brandDeep = Color(0xFF163A9E);
+const _brandBright = Color(0xFF2F63EE);
 
 /// The Home hero's background.
 LinearGradient brandGradient(Brightness brightness) => LinearGradient(
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
-      colors: brightness == Brightness.dark ? const [Color(0xFF312E81), Color(0xFF1E1B4B)] : const [_brandBright, _brandDeep],
+      colors: brightness == Brightness.dark ? const [Color(0xFF15307F), Color(0xFF0B1A47)] : const [_brandBright, _brandDeep],
     );
 
 ThemeData buildTheme(Brightness brightness) {
   final dark = brightness == Brightness.dark;
-  final scheme = ColorScheme.fromSeed(seedColor: brandSeed, brightness: brightness);
+  final scheme = ColorScheme.fromSeed(seedColor: brandSeed, brightness: brightness).copyWith(primary: dark ? null : brandSeed, tertiary: brandGold, onTertiary: const Color(0xFF3D2E00));
   final background = dark ? const Color(0xFF0F1117) : const Color(0xFFF4F5FA);
   final card = dark ? const Color(0xFF181B24) : Colors.white;
   final outline = dark ? const Color(0xFF2A2E3A) : const Color(0xFFE6E8F0);

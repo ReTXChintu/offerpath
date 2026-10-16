@@ -12,7 +12,7 @@ class BrandLogo extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ClipRRect(
         borderRadius: BorderRadius.circular(size * 0.22),
-        child: Image.asset('assets/logo.png', width: size, height: size, fit: BoxFit.cover, semanticLabel: 'Job Hunter'),
+        child: Image.asset('assets/logo.png', width: size, height: size, fit: BoxFit.cover, semanticLabel: 'Offerpath'),
       );
 }
 

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../logic/filters.dart';
+import '../learn/learn_screen.dart';
 import '../logic/links.dart';
 import '../services/link_bus.dart';
 import '../state/applications_controller.dart';
@@ -11,10 +12,9 @@ import '../state/nav_controller.dart';
 import '../state/notifications_controller.dart';
 import 'about_screen.dart';
 import 'application_detail_screen.dart';
-import 'applications_list_screen.dart';
 import 'home_screen.dart';
 import 'job_sites_screen.dart';
-import 'jobs_screen.dart';
+import 'hunt_screen.dart';
 import 'more_screen.dart';
 import 'notifications_screen.dart';
 
@@ -24,7 +24,7 @@ void openAppLink(BuildContext context, AppLink link) {
   final nav = context.read<NavController>();
   switch (link.kind) {
     case LinkKind.application:
-      nav.select(tabApplications);
+      nav.openApplications();
       Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ApplicationDetailScreen(applicationId: link.id!)));
     case LinkKind.applications:
       nav.openApplications();
@@ -34,11 +34,11 @@ void openAppLink(BuildContext context, AppLink link) {
       nav.select(tabMore);
       Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const JobSitesScreen()));
     case LinkKind.home:
-      nav.select(tabHome);
+      nav.select(tabToday);
   }
 }
 
-/// The signed-in shell: Home, Applications, Jobs, Alerts, More.
+/// The signed-in shell (plan section 5.4): Today, Learn, Hunt, Alerts, More.
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
 
@@ -88,7 +88,7 @@ class _AppShellState extends State<AppShell> {
           Expanded(
             child: IndexedStack(
               index: nav.tab,
-              children: const [HomeScreen(), ApplicationsListScreen(), JobsScreen(), NotificationsScreen(), MoreScreen()],
+              children: const [HomeScreen(), LearnScreen(), HuntScreen(), NotificationsScreen(), MoreScreen()],
             ),
           ),
         ],
@@ -101,9 +101,9 @@ class _AppShellState extends State<AppShell> {
           nav.select(i);
         },
         destinations: [
-          const NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Home'),
-          NavigationDestination(icon: badged(Icons.fact_check_outlined, waiting), selectedIcon: badged(Icons.fact_check, waiting), label: 'Applications'),
-          const NavigationDestination(icon: Icon(Icons.work_outline), selectedIcon: Icon(Icons.work), label: 'Jobs'),
+          const NavigationDestination(icon: Icon(Icons.today_outlined), selectedIcon: Icon(Icons.today), label: 'Today'),
+          const NavigationDestination(icon: Icon(Icons.school_outlined), selectedIcon: Icon(Icons.school), label: 'Learn'),
+          NavigationDestination(icon: badged(Icons.work_outline, waiting), selectedIcon: badged(Icons.work, waiting), label: 'Hunt'),
           NavigationDestination(icon: badged(Icons.notifications_outlined, unread), selectedIcon: badged(Icons.notifications, unread), label: 'Alerts'),
           const NavigationDestination(icon: Icon(Icons.more_horiz), selectedIcon: Icon(Icons.more_horiz), label: 'More'),
         ],

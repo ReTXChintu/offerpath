@@ -7,11 +7,10 @@ import 'package:provider/provider.dart';
 import '../config.dart';
 import '../state/auth_controller.dart';
 
-/// Pairs this phone using a one-time code minted on the desktop (Settings
-/// > Mobile app > Generate pairing code). The QR just encodes
-/// `{"code": "..."}` -- see `apps/desktop/src/components/MobileAppSettings.tsx`
-/// -- and the server URL is built into the app (see `lib/config.dart`),
-/// never taken from the QR.
+/// Pairs this phone with a one-time code minted on the desktop (Settings >
+/// Devices), via `POST /api/v1/pairing/redeem`. The QR encodes
+/// `{"code": "..."}` (a bare code also works); the server address is built
+/// into the app (`lib/config.dart`), never taken from the QR.
 class PairingScanScreen extends StatefulWidget {
   const PairingScanScreen({super.key});
 
@@ -20,7 +19,7 @@ class PairingScanScreen extends StatefulWidget {
 }
 
 class _PairingScanScreenState extends State<PairingScanScreen> {
-  final _relayCtrl = TextEditingController();
+  final _serverCtrl = TextEditingController();
   final _codeCtrl = TextEditingController();
   final _deviceNameCtrl = TextEditingController();
   final _formKey = GlobalKey<FormState>();
@@ -30,7 +29,7 @@ class _PairingScanScreenState extends State<PairingScanScreen> {
 
   @override
   void dispose() {
-    _relayCtrl.dispose();
+    _serverCtrl.dispose();
     _codeCtrl.dispose();
     _deviceNameCtrl.dispose();
     _scanner?.dispose();
@@ -69,14 +68,14 @@ class _PairingScanScreenState extends State<PairingScanScreen> {
     _submit();
   }
 
-  String get _serverUrl => hasBuiltInServer ? kBuiltInServerUrl : _relayCtrl.text;
+  String get _serverUrl => hasBuiltInServer ? kBuiltInServerUrl : _serverCtrl.text;
 
   Future<void> _submit() async {
     if (_serverUrl.trim().isEmpty || _codeCtrl.text.trim().isEmpty) {
       if (!_formKey.currentState!.validate()) return;
     }
     final auth = context.read<AuthController>();
-    final ok = await auth.pairWithCode(relayUrl: _serverUrl, code: _codeCtrl.text, deviceName: _deviceNameCtrl.text);
+    final ok = await auth.pairWithCode(serverUrl: _serverUrl, code: _codeCtrl.text, deviceName: _deviceNameCtrl.text);
     if (ok && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Paired.')));
     }
@@ -93,12 +92,12 @@ class _PairingScanScreenState extends State<PairingScanScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const SizedBox(height: 8),
-            Text('Scan the QR code, or type the code shown in Settings > Mobile app on your desktop.', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+            Text('Scan the QR code, or type the code shown under Settings > Devices on your desktop.', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
             const SizedBox(height: 20),
             if (!hasBuiltInServer) ...[
               TextFormField(
-                controller: _relayCtrl,
-                decoration: const InputDecoration(labelText: 'Server URL', hintText: 'http://192.168.1.10:8788'),
+                controller: _serverCtrl,
+                decoration: const InputDecoration(labelText: 'Server URL', hintText: 'http://192.168.1.10:50005'),
                 keyboardType: TextInputType.url,
                 autocorrect: false,
                 validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,

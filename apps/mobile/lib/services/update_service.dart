@@ -1,8 +1,12 @@
 import 'package:dio/dio.dart';
 
-/// The latest Android build the Job Hunter server hosts, from
-/// `GET /v1/downloads` (see `apps/backend/src/routes/static.ts`). No auth:
-/// the build list isn't secret, so this works even while signed out.
+import '../config.dart';
+
+/// The latest Android build the Offerpath server hosts, from
+/// `GET /api/v1/downloads` (`apps/api/src/modules/downloads`). CI uploads it
+/// as `offerpath-<version>-<build>.apk`, and the server reads the version
+/// and build number from that name. No auth: the build list isn't secret,
+/// so this works even while signed out.
 class ServerBuild {
   final String fileName;
   final String? version;
@@ -19,7 +23,7 @@ class ServerBuild {
         build: (json['build'] as num?)?.toInt(),
         sizeBytes: (json['sizeBytes'] as num?)?.toInt() ?? 0,
         updatedAt: DateTime.tryParse(json['updatedAt'] as String? ?? ''),
-        url: json['url'] as String? ?? '/downloads/android',
+        url: json['url'] as String? ?? '$kApiPrefix/downloads/android',
       );
 }
 
@@ -75,8 +79,8 @@ class UpdateService {
   UpdateService({Dio? dio}) : _dio = dio ?? Dio(BaseOptions(connectTimeout: const Duration(seconds: 10), receiveTimeout: const Duration(seconds: 10)));
 
   Future<UpdateInfo> check({required String serverUrl, required String currentVersion, required int currentBuild}) async {
-    final base = serverUrl.endsWith('/') ? serverUrl.substring(0, serverUrl.length - 1) : serverUrl;
-    final resp = await _dio.get<Map<String, dynamic>>('$base/v1/downloads');
+    final base = normalizeServerUrl(serverUrl);
+    final resp = await _dio.get<Map<String, dynamic>>('${apiBaseUrl(base)}/downloads');
     final raw = resp.data?['android'];
     final latest = raw is Map<String, dynamic> ? ServerBuild.fromJson(raw) : null;
     final available = latest != null && isNewer(latest, currentVersion, currentBuild);

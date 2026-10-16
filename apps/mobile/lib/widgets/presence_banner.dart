@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../services/relay_client.dart';
+import '../services/hub_client.dart';
 import '../state/connection_controller.dart';
 import '../util/format.dart';
 import 'common.dart';
@@ -19,7 +19,7 @@ class PresenceBanner extends StatelessWidget {
       return InlineNotice(
         color: Colors.orange,
         icon: Icons.cloud_off,
-        text: connection.socketState == SocketState.connecting ? 'Connecting to your Job Hunter server…' : 'Not connected to your Job Hunter server',
+        text: connection.socketState == SocketState.connecting ? 'Connecting to your Offerpath server…' : 'Not connected to your Offerpath server',
       );
     }
     if (!connection.desktopOnline) {

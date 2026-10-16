@@ -174,8 +174,8 @@ class JobDetail {
 }
 
 /// Builds the job list from the server's raw collections, for when the
-/// desktop is offline: `/v1/data/jobs`, `/v1/data/job_analyses` (newest per
-/// job wins) and `/v1/applications` (for each job's application status).
+/// desktop is offline: `/api/v1/data/jobs`, `/api/v1/data/job_analyses` (newest per
+/// job wins) and `/api/v1/applications` (for each job's application status).
 List<JobListItem> buildJobItemsFromServer(dynamic jobsResp, dynamic analysesResp, dynamic applicationsResp) {
   List<Map<String, dynamic>> docs(dynamic resp) => resp is Map ? mapList(resp['documents']) : mapList(resp);
 

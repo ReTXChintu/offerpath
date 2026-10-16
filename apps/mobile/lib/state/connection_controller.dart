@@ -1,28 +1,34 @@
 import 'dart:async';
 
-import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import '../models/app_notification.dart';
 import '../models/dashboard.dart';
 import '../models/envelope.dart';
-import '../services/relay_client.dart';
+import '../services/hub_client.dart';
 import 'auth_controller.dart';
 
-/// Owns the live `RelayClient` for as long as the user is signed in,
-/// tracks the phone's own socket state, the desktop's presence (reported by
-/// the server, never guessed) and the agent's state (`agent_status` pushes),
-/// and republishes `changed` pushes for the data controllers to react to.
+/// Builds the hub socket for a sign-in; replaced in tests.
+typedef HubFactory = HubClient Function(String serverUrl, String deviceToken);
+
+HubClient _defaultHub(String serverUrl, String deviceToken) => HubClient(serverUrl: serverUrl, deviceToken: deviceToken);
+
+/// Owns the live [HubClient] for as long as the user is signed in, tracks
+/// the phone's own socket state, the desktop's presence (reported by the
+/// server, never guessed) and the agent's state (`agent_status` pushes), and
+/// republishes `changed` pushes for the data controllers to react to.
 class ConnectionController extends ChangeNotifier {
   final AuthController auth;
-  ConnectionController(this.auth) {
+  final HubFactory _hubFactory;
+  ConnectionController(this.auth, {HubFactory? hubFactory}) : _hubFactory = hubFactory ?? _defaultHub {
     auth.addListener(_onAuthChanged);
     _onAuthChanged();
   }
 
-  RelayClient? _client;
+  HubClient? _client;
   StreamSubscription? _stateSub;
   StreamSubscription? _pushSub;
+  StreamSubscription? _signedOutSub;
 
   SocketState socketState = SocketState.disconnected;
   bool desktopOnline = false;
@@ -50,15 +56,15 @@ class ConnectionController extends ChangeNotifier {
   bool get desktopReachable => connected && desktopOnline;
 
   void _onAuthChanged() {
-    if (auth.status == AuthStatus.signedIn && auth.relayUrl != null && auth.deviceToken != null) {
-      if (_client == null) _connect(auth.relayUrl!, auth.deviceToken!);
+    if (auth.status == AuthStatus.signedIn && auth.serverUrl != null && auth.deviceToken != null) {
+      if (_client == null) _connect(auth.serverUrl!, auth.deviceToken!);
     } else {
       _disconnect();
     }
   }
 
-  void _connect(String relayUrl, String deviceToken) {
-    final client = RelayClient(relayUrl: relayUrl, deviceToken: deviceToken);
+  void _connect(String serverUrl, String deviceToken) {
+    final client = _hubFactory(serverUrl, deviceToken);
     _client = client;
     _stateSub = client.state.listen((s) {
       final was = socketState;
@@ -71,12 +77,16 @@ class ConnectionController extends ChangeNotifier {
       if (s == SocketState.connected && was != SocketState.connected) _resyncController.add(null);
     });
     _pushSub = client.pushes.listen(_onPush);
+    // 4401: this phone was signed out elsewhere.
+    _signedOutSub = client.signedOut.listen((_) => auth.handleRevoked());
     client.connect();
   }
 
   void _disconnect() {
+    if (_client == null && socketState == SocketState.disconnected && !desktopOnline) return;
     _stateSub?.cancel();
     _pushSub?.cancel();
+    _signedOutSub?.cancel();
     _client?.dispose();
     _client = null;
     socketState = SocketState.disconnected;
@@ -118,28 +128,25 @@ class ConnectionController extends ChangeNotifier {
     }
   }
 
-  /// Reads a server view directly (e.g. `/v1/applications`) with this
-  /// phone's device token. The server keeps the desktop's synced data, so
-  /// the phone can show it while the desktop is offline. Returns null on
-  /// any failure.
+  /// Reads a server view directly (e.g. `/applications`, relative to
+  /// `/api/v1`) with this phone's device token. The server keeps the
+  /// desktop's synced data, so the phone can show it while the desktop is
+  /// offline. Returns null on any failure.
   Future<dynamic> serverGet(String path) async {
-    final url = auth.relayUrl;
-    final token = auth.deviceToken;
-    if (url == null || token == null) return null;
+    final api = auth.api;
+    if (api == null) return null;
     try {
-      final dio = Dio(BaseOptions(baseUrl: url, connectTimeout: const Duration(seconds: 15), receiveTimeout: const Duration(seconds: 20)));
-      final resp = await dio.get<dynamic>(path, options: Options(headers: {'Authorization': 'Bearer $token'}));
-      return resp.data;
+      return await api.get(path);
     } catch (e) {
       debugPrint('server read $path failed: $e');
       return null;
     }
   }
 
-  /// Sends a request to the desktop through the server. Fails immediately
-  /// with `NOT_CONNECTED` when there's no socket, and the server itself
-  /// answers `DESKTOP_OFFLINE` when the desktop isn't connected -- it never
-  /// queues an action.
+  /// Sends a request to the desktop through the hub. Fails immediately with
+  /// `NOT_CONNECTED` when there's no socket, and the server itself answers
+  /// `DESKTOP_OFFLINE` when the desktop isn't connected; it never queues an
+  /// action.
   Future<RelayResponse> request(String type, [Map<String, dynamic> payload = const {}]) {
     final client = _client;
     if (client == null) {

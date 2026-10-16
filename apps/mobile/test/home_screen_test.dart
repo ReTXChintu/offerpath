@@ -8,6 +8,7 @@ import 'package:offerpath_mobile/state/agent_controller.dart';
 import 'package:offerpath_mobile/state/applications_controller.dart';
 import 'package:offerpath_mobile/state/auth_controller.dart';
 import 'package:offerpath_mobile/state/connection_controller.dart';
+import 'package:offerpath_mobile/state/learning_controller.dart';
 import 'package:offerpath_mobile/state/nav_controller.dart';
 import 'package:offerpath_mobile/state/queue_controller.dart';
 import 'package:provider/provider.dart';
@@ -38,6 +39,7 @@ Future<(FakeConnectionController, QueueController)> pumpHome(WidgetTester tester
       ChangeNotifierProvider<AgentController>.value(value: AgentController(fake)),
       ChangeNotifierProvider<QueueController>.value(value: queue),
       ChangeNotifierProvider<NavController>.value(value: NavController()),
+      ChangeNotifierProvider<LearningController>.value(value: LearningController(auth)),
     ],
     child: MaterialApp(home: home ?? const HomeScreen()),
   ));
@@ -48,8 +50,9 @@ Future<(FakeConnectionController, QueueController)> pumpHome(WidgetTester tester
 }
 
 void main() {
-  testWidgets('Home shows what is queued and every desktop action', (tester) async {
+  testWidgets('Today shows learning, what is queued and every desktop action', (tester) async {
     await pumpHome(tester);
+    expect(find.text('Learn today'), findsOneWidget);
     expect(find.text('Up next'), findsOneWidget);
     expect(find.text('1. Apply: Developer at Acme'), findsNothing); // titles are plain; the place is drawn as a badge
     expect(find.text('Apply: Developer at Acme'), findsOneWidget);

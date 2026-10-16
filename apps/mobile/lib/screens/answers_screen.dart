@@ -90,7 +90,7 @@ class _AnswersScreenState extends State<AnswersScreen> {
     }
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Additional details')),
+      appBar: AppBar(title: const Text('Saved answers')),
       floatingActionButton: canEdit ? FloatingActionButton.extended(onPressed: () => _edit(null), icon: const Icon(Icons.add), label: const Text('Add')) : null,
       body: Column(children: [
         const PresenceBanner(),

@@ -39,8 +39,8 @@ const _busyStates = {'INITIALIZING', 'DISCOVERING', 'EXTRACTING', 'DEDUPLICATING
 
 bool agentBusy(String state) => _busyStates.contains(state);
 
-const desktopOfflineMessage = 'Your desktop is offline — open Job Hunter on your computer.';
-const notConnectedMessage = "You're not connected to your Job Hunter server. Check your internet connection.";
+const desktopOfflineMessage = 'Your desktop is offline — open Offerpath on your computer.';
+const notConnectedMessage = "You're not connected to your Offerpath server. Check your internet connection.";
 
 /// The message to show for a failed request.
 String friendlyError(RelayResponse resp) => switch (resp.errorCode) {

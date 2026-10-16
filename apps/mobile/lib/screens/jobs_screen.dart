@@ -18,7 +18,10 @@ import 'job_detail_screen.dart';
 
 /// Every job the desktop found, filterable and searchable, newest first.
 class JobsScreen extends StatefulWidget {
-  const JobsScreen({super.key});
+  const JobsScreen({this.embedded = false, super.key});
+
+  /// Shown as a page of the Hunt tab, under its app bar.
+  final bool embedded;
 
   @override
   State<JobsScreen> createState() => _JobsScreenState();
@@ -40,7 +43,7 @@ class _JobsScreenState extends State<JobsScreen> {
 
   void _onNav() {
     if (!mounted) return;
-    if (_nav.tab == tabJobs) context.read<JobsController>().ensureLoaded();
+    if (_nav.tab == tabHunt && _nav.huntPage == huntJobs) context.read<JobsController>().ensureLoaded();
     final requested = _nav.takeJobFilter();
     if (requested != null) setState(() => _filter = requested);
   }
@@ -96,7 +99,7 @@ class _JobsScreenState extends State<JobsScreen> {
     }
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Jobs')),
+      appBar: widget.embedded ? null : AppBar(title: const Text('Jobs')),
       body: Column(
         children: [
           const PresenceBanner(),

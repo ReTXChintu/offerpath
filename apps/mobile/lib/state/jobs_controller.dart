@@ -53,9 +53,9 @@ class JobsController extends ChangeNotifier {
       error = null;
     } else {
       final results = await Future.wait([
-        connection.serverGet('/v1/data/jobs'),
-        connection.serverGet('/v1/data/job_analyses'),
-        connection.serverGet('/v1/applications'),
+        connection.serverGet('/data/jobs'),
+        connection.serverGet('/data/job_analyses'),
+        connection.serverGet('/applications'),
       ]);
       if (results[0] is Map) {
         items = buildJobItemsFromServer(results[0], results[1], results[2]);
@@ -85,7 +85,7 @@ class JobsController extends ChangeNotifier {
       Application? application;
       final appId = item.job.applicationId;
       if (appId != null) {
-        final data = await connection.serverGet('/v1/applications/${Uri.encodeComponent(appId)}');
+        final data = await connection.serverGet('/applications/${Uri.encodeComponent(appId)}');
         if (data is Map && data['application'] is Map) application = Application.fromJson((data['application'] as Map).cast<String, dynamic>());
       }
       lastDetailFromServer = true;
