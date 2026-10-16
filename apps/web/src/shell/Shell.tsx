@@ -21,7 +21,17 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } fr
 
 import { useAuth } from '../auth-context';
 
-import { GROW, HUNT, PROGRESS, SETTINGS, TODAY, isActive, isFullBleed, type NavEntry } from './nav';
+import {
+  GET_APPS,
+  GROW,
+  HUNT,
+  PROGRESS,
+  SETTINGS,
+  TODAY,
+  isActive,
+  isFullBleed,
+  type NavEntry,
+} from './nav';
 
 const isMac = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform);
 
@@ -101,6 +111,7 @@ function WebSidebar({ path }: { path: string }) {
     <Sidebar
       footer={
         <>
+          <Item entry={GET_APPS} path={path} />
           <Item entry={SETTINGS} path={path} />
           <button
             type="button"
@@ -193,6 +204,7 @@ function WebCommandPalette({
       ...HUNT.map((e) => go(e, 'Hunt')),
       go(PROGRESS, 'Go to'),
       go(SETTINGS, 'Go to'),
+      go(GET_APPS, 'Go to'),
       {
         id: 'theme:light',
         label: 'Theme: light',

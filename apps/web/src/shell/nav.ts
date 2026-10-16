@@ -44,6 +44,14 @@ export const SETTINGS: NavEntry = {
   keywords: 'account devices downloads goal models',
 };
 
+/** The desktop installer and the Android app (Settings → Downloads). */
+export const GET_APPS: NavEntry = {
+  path: '/settings?tab=downloads',
+  label: 'Get the apps',
+  icon: 'download',
+  keywords: 'download install windows android apk desktop phone',
+};
+
 /** Pages that belong to a sidebar entry without sharing its path. */
 const ALSO: Record<string, string[]> = {
   '/learn': ['/concept'],

@@ -11,6 +11,7 @@ import {
 } from '@offerpath/ui';
 import { useState, type FormEvent } from 'react';
 
+import { GetTheApps } from '../components/GetTheApps';
 import type { Auth } from '../session';
 
 type Mode = 'login' | 'register';
@@ -121,6 +122,9 @@ export function AuthPage({ auth }: { auth: Auth }) {
             {mode === 'login' ? 'Sign in' : 'Create account'}
           </Button>
         </form>
+        <div className="auth-apps">
+          <GetTheApps />
+        </div>
       </div>
     </div>
   );

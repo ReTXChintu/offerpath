@@ -53,7 +53,8 @@ export function SettingsPage() {
   return (
     <div>
       <PageHeader title="Settings" />
-      <Tabs defaultValue={initial}>
+      {/* Keyed by the link's tab, so "Get the apps" switches tabs even from within Settings. */}
+      <Tabs key={initial} defaultValue={initial}>
         <TabsList label="Settings">
           <TabsTrigger value="account">Account</TabsTrigger>
           <TabsTrigger value="goal">Goal &amp; learning</TabsTrigger>
