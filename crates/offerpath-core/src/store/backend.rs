@@ -215,6 +215,74 @@ impl BackendClientHandle {
     }
 }
 
+/// An API reply passed through as it came: the learning pages read problem
+/// details (`ai-unavailable`, `assistance-gated`, …) themselves.
+#[derive(Debug, Clone, serde::Serialize, PartialEq)]
+pub struct ApiReply {
+    pub status: u16,
+    pub body: Option<Value>,
+}
+
+/// Checks a path the webview asks to call: one API path under `/api/v1`,
+/// never another host or a way out of it.
+pub fn valid_api_path(path: &str) -> bool {
+    path.starts_with('/')
+        && !path.starts_with("//")
+        && !path.contains("..")
+        && !path.contains('\\')
+        && !path.contains("://")
+        && !path.chars().any(|c| c.is_control() || c == '#')
+}
+
+impl BackendClientHandle {
+    /// One request to the API with this desktop's device token, for the
+    /// learning pages. The token never reaches the webview.
+    pub async fn request(
+        &self,
+        http: &reqwest::Client,
+        method: &str,
+        path: &str,
+        body: Option<&Value>,
+        idempotency_key: Option<&str>,
+    ) -> CoreResult<ApiReply> {
+        if !valid_api_path(path) {
+            return Err(CoreError::Validation(format!("Not an API path: {path}")));
+        }
+        let method = match method {
+            "GET" => reqwest::Method::GET,
+            "POST" => reqwest::Method::POST,
+            "PUT" => reqwest::Method::PUT,
+            "PATCH" => reqwest::Method::PATCH,
+            "DELETE" => reqwest::Method::DELETE,
+            other => return Err(CoreError::Validation(format!("Unsupported method {other}"))),
+        };
+        let mut req = http
+            .request(method, format!("{}/v1{path}", api(&self.base_url)))
+            .bearer_auth(&self.device_token);
+        if let Some(key) = idempotency_key {
+            req = req.header("Idempotency-Key", key);
+        }
+        if let Some(body) = body {
+            req = req.json(body);
+        }
+        let resp = req
+            .send()
+            .await
+            .map_err(|e| CoreError::Network(e.to_string()))?;
+        let status = resp.status().as_u16();
+        let bytes = resp
+            .bytes()
+            .await
+            .map_err(|e| CoreError::Network(e.to_string()))?;
+        let body = if bytes.is_empty() {
+            None
+        } else {
+            serde_json::from_slice(&bytes).ok()
+        };
+        Ok(ApiReply { status, body })
+    }
+}
+
 /// The API answers errors as problem details: `{ type, title, status, detail, errors }`.
 #[derive(Deserialize)]
 struct ErrBody {
@@ -275,6 +343,19 @@ pub fn label_for(base_url: &str, account_email: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_api_paths_reach_the_server() {
+        assert!(valid_api_path("/today"));
+        assert!(valid_api_path("/concepts/abc/chat"));
+        assert!(valid_api_path("/technologies?search=react%20native"));
+        assert!(!valid_api_path("today"));
+        assert!(!valid_api_path("//evil.example.com/x"));
+        assert!(!valid_api_path("/../admin"));
+        assert!(!valid_api_path("/x\\y"));
+        assert!(!valid_api_path("/redirect?to=http://evil"));
+        assert!(!valid_api_path("/x\ny"));
+    }
 
     #[test]
     fn backend_url_is_normalized_and_insecure_urls_are_refused_by_default() {

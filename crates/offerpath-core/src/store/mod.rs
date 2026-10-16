@@ -11,6 +11,6 @@ pub mod backend;
 pub mod local;
 pub mod sync;
 
-pub use backend::BackendClientHandle;
+pub use backend::{ApiReply, BackendClientHandle};
 pub use local::{LocalStore, PendingOp, SyncOp};
 pub use sync::{SyncStatus, SyncWorker};

@@ -30,7 +30,17 @@ import {
 import { Outlet, useRouter, useRouterState } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { BOTTOM, GROW, HUNT, MORE, PROGRESS, TODAY, isActive, type NavEntry } from './nav';
+import {
+  BOTTOM,
+  GROW,
+  HUNT,
+  MORE,
+  PROGRESS,
+  TODAY,
+  isActive,
+  isFullBleed,
+  type NavEntry,
+} from './nav';
 import { NavLink, toHref } from './NavLink';
 
 const isMac = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform);
@@ -59,6 +69,7 @@ export function Shell() {
       topbar={<AppTopBar onOpenPalette={() => setPaletteOpen(true)} />}
       banner={<UpdateBanner />}
       statusbar={<AgentStatusBar />}
+      flush={isFullBleed(path)}
     >
       <Outlet />
       <AppCommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />

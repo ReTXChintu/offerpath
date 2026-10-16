@@ -9,23 +9,33 @@ import {
   ResumesPage,
 } from '@offerpath/hunt';
 import {
+  InterviewGuide,
+  Onboarding,
+  PracticePage,
+  RecallPage,
+  RoadmapPage,
+  Technologies,
+} from '@offerpath/learn';
+import {
   createHashHistory,
   createRootRoute,
   createRoute,
   createRouter,
   type RouterHistory,
 } from '@tanstack/react-router';
-import type { ReactNode } from 'react';
+import type { ComponentType, ReactNode } from 'react';
 
 import {
-  InterviewsPage,
-  LearnPage,
-  PracticePage,
-  ProgressPage,
-  RecallPage,
-  RoadmapPage,
-  TodayPage,
-} from './pages/Placeholders';
+  ChallengeRoute,
+  ConceptRoute,
+  DesktopProgress,
+  ExerciseRoute,
+  InterviewRoute,
+  ProjectRoute,
+  RequireAccount,
+  TechnologyRoute,
+} from './learn';
+import { DesktopToday } from './pages/Today';
 import { ApplicationReviewRoute, JobDetailRoute, SettingsRoute, SetupRoute } from './routes';
 import { Shell } from './shell/Shell';
 
@@ -34,15 +44,30 @@ const rootRoute = createRootRoute({ component: Shell });
 const page = (path: string, component: () => ReactNode) =>
   createRoute({ getParentRoute: () => rootRoute, path, component });
 
+/** A learning page: it needs this desktop signed in to an account. */
+const learn = (path: string, Component: ComponentType) =>
+  page(path, () => (
+    <RequireAccount>
+      <Component />
+    </RequireAccount>
+  ));
+
 const routeTree = rootRoute.addChildren([
-  page('/', TodayPage),
-  // Grow and Progress: the learning side arrives in phase 3.
-  page('/roadmap', RoadmapPage),
-  page('/learn', LearnPage),
-  page('/practice', PracticePage),
-  page('/recall', RecallPage),
-  page('/interviews', InterviewsPage),
-  page('/progress', ProgressPage),
+  page('/', DesktopToday),
+  // Grow and Progress: @offerpath/learn's pages over the desktop's API client.
+  learn('/roadmap', RoadmapPage),
+  learn('/learn', Technologies),
+  learn('/learn/$technologyId', TechnologyRoute),
+  learn('/concept/$conceptId', ConceptRoute),
+  learn('/practice', PracticePage),
+  learn('/exercise/$exerciseId', ExerciseRoute),
+  learn('/project/$exerciseId', ProjectRoute),
+  learn('/challenge/$exerciseId', ChallengeRoute),
+  learn('/recall', RecallPage),
+  learn('/interviews', InterviewGuide),
+  learn('/interviews/$interviewId', InterviewRoute),
+  learn('/progress', DesktopProgress),
+  learn('/onboarding', Onboarding),
   // Hunt: @offerpath/hunt's pages over the Tauri client.
   page('/hunt', DashboardPage),
   page('/jobs', JobsPage),

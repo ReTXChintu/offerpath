@@ -200,6 +200,23 @@ pub async fn get_sync_status(ctx: Ctx<'_>) -> R<SyncStatus> {
     Ok(ctx.sync.status().await)
 }
 
+/// The learning pages' API calls, made here with this desktop's device token
+/// so the token never reaches the webview (and the webview's CSP stays
+/// `connect-src 'self'`). The reply is passed through as it came.
+#[tauri::command]
+pub async fn learn_api_request(
+    ctx: Ctx<'_>,
+    method: String,
+    path: String,
+    body: Option<serde_json::Value>,
+    idempotency_key: Option<String>,
+) -> R<offerpath_core::store::ApiReply> {
+    ctx.sync
+        .api_request(&method, &path, body.as_ref(), idempotency_key.as_deref())
+        .await
+        .map_err(Into::into)
+}
+
 // ---- candidate ---------------------------------------------------------------
 
 #[tauri::command]

@@ -71,7 +71,24 @@ export const MORE: NavEntry[] = [
 ];
 
 /** Whether a sidebar entry is the current page (sub-pages count: /jobs/42 → Jobs). */
+/** Pages that belong to a sidebar entry without sharing its path. */
+const ALSO: Record<string, string[]> = {
+  '/learn': ['/concept'],
+  '/practice': ['/exercise', '/project', '/challenge'],
+};
+
 export function isActive(entryPath: string, current: string): boolean {
   if (entryPath === '/') return current === '/';
-  return current === entryPath || current.startsWith(`${entryPath}/`);
+  return [entryPath, ...(ALSO[entryPath] ?? [])].some(
+    (p) => current === p || current.startsWith(`${p}/`),
+  );
+}
+
+/** Pages that own the whole content area: editors, the terminal, a live interview, onboarding. */
+export function isFullBleed(path: string): boolean {
+  return (
+    /^\/(exercise|project|challenge)\/[^/]+$/.test(path) ||
+    /^\/interviews\/[^/]+$/.test(path) ||
+    path === '/onboarding'
+  );
 }
