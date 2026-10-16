@@ -92,7 +92,9 @@ pub fn detect(root: &Path) -> Option<LegacyData> {
 /// True when this Offerpath installation has no hunt data yet, so an import
 /// can't overwrite anything.
 pub fn is_fresh(paths: &AppPaths) -> bool {
-    ["jobs", "applications", "candidate_profiles", "resumes"]
+    // Not candidate_profiles or users: the app creates an empty one of each on
+    // its first start, before anyone could have imported anything.
+    ["jobs", "applications", "resumes", "experiences", "projects"]
         .iter()
         .all(|name| {
             std::fs::read_to_string(paths.database_dir().join(format!("{name}.json")))
@@ -101,6 +103,27 @@ pub fn is_fresh(paths: &AppPaths) -> bool {
                 .map(|docs| docs.is_empty())
                 .unwrap_or(true)
         })
+}
+
+/// The marker that asks the next start to import (see [`import_pending`]).
+const PENDING_MARKER: &str = "import-legacy.pending";
+
+/// Asks the next start to import the old data. The copy runs then, before the
+/// store is opened, so nothing in memory can write over it.
+pub fn request_import(paths: &AppPaths) -> CoreResult<()> {
+    std::fs::write(paths.root.join(PENDING_MARKER), b"")?;
+    Ok(())
+}
+
+/// At start-up, before `AppContext::init`: runs a requested import, once.
+pub fn import_pending(paths: &AppPaths) -> Option<CoreResult<ImportReport>> {
+    let marker = paths.root.join(PENDING_MARKER);
+    if !marker.exists() {
+        return None;
+    }
+    let _ = std::fs::remove_file(&marker);
+    let root = default_legacy_root()?;
+    Some(import(&root, paths))
 }
 
 /// Copies the old data into `paths`. Refuses unless Offerpath's own store is

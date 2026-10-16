@@ -47,7 +47,7 @@ pub async fn get_legacy_import(ctx: Ctx<'_>) -> R<Option<offerpath_core::legacy:
     Ok(offerpath_core::legacy::detect(&root))
 }
 
-/// Copies the old data in, then restarts so the store loads it.
+/// Imports the old data: restarts, and the copy runs before the store opens.
 #[tauri::command]
 pub async fn import_legacy_data(app: tauri::AppHandle, ctx: Ctx<'_>) -> R<()> {
     let root = offerpath_core::legacy::default_legacy_root().ok_or_else(|| UserFacingError {
@@ -56,7 +56,16 @@ pub async fn import_legacy_data(app: tauri::AppHandle, ctx: Ctx<'_>) -> R<()> {
         details: None,
         recoverable: false,
     })?;
-    offerpath_core::legacy::import(&root, &ctx.paths)?;
+    if offerpath_core::legacy::detect(&root).is_none() {
+        return Err(UserFacingError {
+            code: "NOT_FOUND".into(),
+            message: "No Job Hunter data found on this computer".into(),
+            details: None,
+            recoverable: false,
+        });
+    }
+    // Copied at the next start, before the store opens.
+    offerpath_core::legacy::request_import(&ctx.paths)?;
     app.restart();
 }
 

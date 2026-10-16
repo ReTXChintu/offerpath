@@ -155,6 +155,15 @@ pub fn run() {
     let logs = LogBuffer::new(5000, Some(paths.logs_dir()));
     logging::init(logs.clone());
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "Offerpath starting");
+    match offerpath_core::legacy::import_pending(&paths) {
+        Some(Ok(report)) => tracing::info!(
+            documents = report.documents,
+            files = report.files,
+            "imported Job Hunter data"
+        ),
+        Some(Err(e)) => tracing::error!(error = %e, "importing Job Hunter data failed"),
+        None => {}
+    }
 
     tauri::Builder::default()
         // First, so a second launch only brings the running window forward:
