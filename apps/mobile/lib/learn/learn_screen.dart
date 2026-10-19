@@ -5,12 +5,14 @@ import '../logic/links.dart';
 import '../state/auth_controller.dart';
 import '../state/nav_controller.dart';
 import 'interview_page.dart';
+import 'prep_list_page.dart';
 import 'reading_page.dart';
 import 'recall.dart';
 import 'routine_page.dart';
 
 /// The Learn tab: today's routine, recall flashcards, spoken mock
-/// interviews and reading (with the tutor). Ported from ForgeRoutine's app;
+/// interviews, interview prep for real interviews, and reading (with the
+/// tutor). Ported from ForgeRoutine's app;
 /// writing code is absent on purpose, since it needs a keyboard and an
 /// editor, so coding items point to the desktop and the web.
 class LearnScreen extends StatefulWidget {
@@ -22,7 +24,7 @@ class LearnScreen extends StatefulWidget {
 
 class _LearnScreenState extends State<LearnScreen> with SingleTickerProviderStateMixin {
   late final NavController _nav = context.read<NavController>();
-  late final TabController _tabs = TabController(length: 4, vsync: this, initialIndex: _nav.learnPage);
+  late final TabController _tabs = TabController(length: 5, vsync: this, initialIndex: _nav.learnPage);
 
   @override
   void initState() {
@@ -54,7 +56,7 @@ class _LearnScreenState extends State<LearnScreen> with SingleTickerProviderStat
           controller: _tabs,
           isScrollable: true,
           tabAlignment: TabAlignment.start,
-          tabs: const [Tab(text: 'Routine'), Tab(text: 'Recall'), Tab(text: 'Interviews'), Tab(text: 'Read')],
+          tabs: const [Tab(text: 'Routine'), Tab(text: 'Recall'), Tab(text: 'Interviews'), Tab(text: 'Interview prep'), Tab(text: 'Read')],
         ),
       ),
       body: api == null
@@ -67,6 +69,7 @@ class _LearnScreenState extends State<LearnScreen> with SingleTickerProviderStat
                   RoutinePage(api: client, onOpenInterviews: () => _nav.openLearn(learnInterviews)),
                   RecallPage(api: client),
                   InterviewPage(api: client),
+                  PrepListPage(api: client),
                   ReadingPage(api: client),
                 ],
               );

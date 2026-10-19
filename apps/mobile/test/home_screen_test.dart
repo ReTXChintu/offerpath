@@ -8,6 +8,7 @@ import 'package:offerpath_mobile/state/agent_controller.dart';
 import 'package:offerpath_mobile/state/applications_controller.dart';
 import 'package:offerpath_mobile/state/auth_controller.dart';
 import 'package:offerpath_mobile/state/connection_controller.dart';
+import 'package:offerpath_mobile/state/interview_prep_controller.dart';
 import 'package:offerpath_mobile/state/learning_controller.dart';
 import 'package:offerpath_mobile/state/nav_controller.dart';
 import 'package:offerpath_mobile/state/queue_controller.dart';
@@ -40,6 +41,7 @@ Future<(FakeConnectionController, QueueController)> pumpHome(WidgetTester tester
       ChangeNotifierProvider<QueueController>.value(value: queue),
       ChangeNotifierProvider<NavController>.value(value: NavController()),
       ChangeNotifierProvider<LearningController>.value(value: LearningController(auth)),
+      ChangeNotifierProvider<InterviewPrepController>.value(value: InterviewPrepController(auth, fake)),
     ],
     child: MaterialApp(home: home ?? const HomeScreen()),
   ));

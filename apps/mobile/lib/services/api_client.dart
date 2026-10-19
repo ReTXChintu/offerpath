@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 
 import '../config.dart';
 import '../models/envelope.dart';
+import '../models/interview_prep.dart';
 
 /// What the phone shows when an AI answer needs the desktop and it's off.
 const desktopOfflineAiMessage = "Your desktop is offline: AI answers come back when it's on";
@@ -213,5 +214,64 @@ class ApiClient {
     } on ApiException catch (e) {
       return RelayResponse(ok: false, errorCode: e.code ?? (e.isDesktopOffline ? 'DESKTOP_OFFLINE' : e.kind.toUpperCase()), errorMessage: e.isDesktopOffline ? null : e.message);
     }
+  }
+
+  // -- Interview prep -------------------------------------------------------
+
+  static String _prepPath(String id) => '/interview-preps/${Uri.encodeComponent(id)}';
+
+  static Prep _prep(dynamic j) {
+    if (j is! Map) throw const ApiException(status: 0, type: 'bad-reply', title: 'Unexpected reply from the server.');
+    return Prep.fromJson(j.cast<String, dynamic>());
+  }
+
+  /// Every interview being prepared for, soonest first.
+  Future<List<Prep>> listPreps() async {
+    final j = await get('/interview-preps');
+    final list = j is Map ? j['preps'] : j;
+    return (list is List ? list : const []).whereType<Map>().map((m) => Prep.fromJson(m.cast<String, dynamic>())).toList();
+  }
+
+  Future<Prep> getPrep(String id) async => _prep(await get(_prepPath(id)));
+
+  /// Where prep AI would run right now; null when nowhere (laptop offline,
+  /// no OpenAI key).
+  Future<PrepAiSource?> prepAiSource() async {
+    final j = await get('/interview-preps/ai');
+    return prepAiSourceOf(j is Map ? j['source'] : null);
+  }
+
+  /// Starts a prep; it comes back `GENERATING`. [scheduledAt] is local time,
+  /// sent as an ISO date-time with its offset.
+  Future<Prep> createPrep({String? company, String? role, String? jobDescription, List<String> technologies = const [], required DateTime scheduledAt}) async {
+    String? orNull(String? s) => s == null || s.trim().isEmpty ? null : s.trim();
+    return _prep(await post('/interview-preps', body: {
+      'company': orNull(company),
+      'role': orNull(role),
+      'jobDescription': orNull(jobDescription),
+      'technologies': technologies,
+      'scheduledAt': isoWithOffset(scheduledAt),
+    }));
+  }
+
+  /// Changes the company, role or interview time (only what's given; an
+  /// empty company or role clears it).
+  Future<Prep> updatePrep(String id, {String? company, String? role, DateTime? scheduledAt}) async => _prep(await patch(_prepPath(id), body: {
+        if (company != null) 'company': company.trim().isEmpty ? null : company.trim(),
+        if (role != null) 'role': role.trim().isEmpty ? null : role.trim(),
+        if (scheduledAt != null) 'scheduledAt': isoWithOffset(scheduledAt),
+      }));
+
+  Future<void> deletePrep(String id) => delete(_prepPath(id));
+
+  /// Writes the plan and questions again (after a failure).
+  Future<Prep> regeneratePrep(String id) async => _prep(await post('${_prepPath(id)}/regenerate'));
+
+  /// Grades a practice answer. Fails with a 503 `ai-unavailable` when no AI
+  /// can run (see [isPrepAiUnavailable]).
+  Future<PrepQuestion> answerPrepQuestion(String prepId, String questionId, String answer) async {
+    final j = await post('${_prepPath(prepId)}/questions/${Uri.encodeComponent(questionId)}/answer', body: {'answer': answer.trim()}, timeout: aiTimeout);
+    if (j is! Map) throw const ApiException(status: 0, type: 'bad-reply', title: 'Unexpected reply from the server.');
+    return PrepQuestion.fromJson(j.cast<String, dynamic>());
   }
 }
