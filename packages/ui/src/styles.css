@@ -1954,10 +1954,14 @@ a.app-nav-group-label:hover {
   overflow: auto;
   background: var(--bg);
 }
+/* Full width: pages use the room with grids, not a centred column. */
 .app-content-inner {
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 26px 30px 60px;
+  padding: 26px 32px 60px;
+}
+@media (max-width: 640px) {
+  .app-content-inner {
+    padding: 20px 16px 48px;
+  }
 }
 .app-content.no-pad .app-content-inner {
   padding: 0;

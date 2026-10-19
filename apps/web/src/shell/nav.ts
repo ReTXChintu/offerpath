@@ -22,7 +22,21 @@ export const GROW: NavEntry[] = [
   { path: '/practice', label: 'Practice', icon: 'practice', keywords: 'exercises coding' },
   { path: '/recall', label: 'Recall', icon: 'brain', keywords: 'review flashcards' },
   { path: '/interviews', label: 'Interviews', icon: 'interview', keywords: 'mock' },
+  {
+    path: '/interview-prep',
+    label: 'Interview prep',
+    icon: 'calendarPlus',
+    keywords: 'job description questions plan practise upcoming',
+  },
 ];
+
+/** Reached from the palette (and the Interview prep page) rather than the sidebar. */
+export const NEW_PREP: NavEntry = {
+  path: '/interview-prep/new',
+  label: 'Prepare for an interview',
+  icon: 'plus',
+  keywords: 'new interview prep job description',
+};
 
 export const HUNT: NavEntry[] = [
   { path: '/hunt', label: 'Needs you', icon: 'bell', keywords: 'approvals questions start stop' },

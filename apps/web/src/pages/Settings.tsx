@@ -1,5 +1,11 @@
 import { formatBytes } from '@offerpath/hunt';
-import { GoalEditor, LearningSettings, describeError, useApi } from '@offerpath/learn';
+import {
+  AiFallbackSettings,
+  GoalEditor,
+  LearningSettings,
+  describeError,
+  useApi,
+} from '@offerpath/learn';
 import {
   Alert,
   Badge,
@@ -43,10 +49,13 @@ export interface DownloadInfo {
   url: string;
 }
 
-const TABS = ['account', 'goal', 'devices', 'downloads'] as const;
+const TABS = ['account', 'goal', 'ai', 'devices', 'downloads'] as const;
 type Tab = (typeof TABS)[number];
 
-/** Settings on the web (plan 5.3): account, the goal and Claude models, devices, downloads. */
+/**
+ * Settings on the web (plan 5.3): account, the goal, AI (the Claude models and
+ * the OpenAI fallback for interview prep), devices, downloads.
+ */
 export function SettingsPage() {
   const { tab } = useSearch({ strict: false }) as { tab?: string };
   const initial: Tab = TABS.includes(tab as Tab) ? (tab as Tab) : 'account';
@@ -58,6 +67,7 @@ export function SettingsPage() {
         <TabsList label="Settings">
           <TabsTrigger value="account">Account</TabsTrigger>
           <TabsTrigger value="goal">Goal &amp; learning</TabsTrigger>
+          <TabsTrigger value="ai">AI</TabsTrigger>
           <TabsTrigger value="devices">Devices</TabsTrigger>
           <TabsTrigger value="downloads">Downloads</TabsTrigger>
         </TabsList>
@@ -65,9 +75,12 @@ export function SettingsPage() {
           <AccountPanel />
         </TabsContent>
         <TabsContent value="goal">
+          <GoalEditor />
+        </TabsContent>
+        <TabsContent value="ai">
           <div className="col g4">
-            <GoalEditor />
             <LearningSettings />
+            <AiFallbackSettings />
           </div>
         </TabsContent>
         <TabsContent value="devices">

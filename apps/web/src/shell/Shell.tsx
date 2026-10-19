@@ -25,6 +25,7 @@ import {
   GET_APPS,
   GROW,
   HUNT,
+  NEW_PREP,
   PROGRESS,
   SETTINGS,
   TODAY,
@@ -201,6 +202,7 @@ function WebCommandPalette({
     return [
       go(TODAY, 'Go to'),
       ...GROW.map((e) => go(e, 'Grow')),
+      go(NEW_PREP, 'Grow'),
       ...HUNT.map((e) => go(e, 'Hunt')),
       go(PROGRESS, 'Go to'),
       go(SETTINGS, 'Go to'),

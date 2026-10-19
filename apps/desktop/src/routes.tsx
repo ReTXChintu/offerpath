@@ -1,5 +1,5 @@
 import { ApplicationReviewPage, JobDetailPage, SettingsPage, SetupPage } from '@offerpath/hunt';
-import { GoalEditor, LearningSettings } from '@offerpath/learn';
+import { AiFallbackSettings, GoalEditor, LearningSettings } from '@offerpath/learn';
 import { Field, Panel, ThemeSelect } from '@offerpath/ui';
 import { useParams, useSearch } from '@tanstack/react-router';
 
@@ -17,13 +17,16 @@ export function ApplicationReviewRoute() {
 }
 
 /**
- * Settings: the desktop's appearance, the goal and the Claude models, then
- * the hunt's settings. `?tab=backend` opens Account.
+ * Settings: the desktop's appearance, the goal, AI (the Claude models and the
+ * OpenAI fallback for interview prep), then the hunt's settings.
+ * `?tab=backend` opens Account; `?tab=ai` opens AI.
  */
 export function SettingsRoute() {
   const { tab } = useSearch({ strict: false }) as { tab?: string };
   return (
     <SettingsPage
+      // Keyed by the link's tab, so a link to another tab switches even from within Settings.
+      key={tab ?? ''}
       initialTab={tab}
       extraTabs={[
         {
@@ -47,9 +50,18 @@ export function SettingsRoute() {
           label: 'Goal & learning',
           content: (
             <RequireAccount>
+              <GoalEditor />
+            </RequireAccount>
+          ),
+        },
+        {
+          value: 'ai',
+          label: 'AI',
+          content: (
+            <RequireAccount>
               <div className="col g4">
-                <GoalEditor />
                 <LearningSettings />
+                <AiFallbackSettings />
               </div>
             </RequireAccount>
           ),
