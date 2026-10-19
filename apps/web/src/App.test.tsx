@@ -171,6 +171,7 @@ describe('the signed-in web app', () => {
       'Practice',
       'Recall',
       'Interviews',
+      'Interview prep',
       'Progress',
     ]) {
       expect(within(nav).getByRole('link', { name: label })).toBeInTheDocument();
