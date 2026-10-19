@@ -186,7 +186,7 @@ jobs:
           printf '%s\n' "$DEPLOY_SSH_KEY" > "$key"
           chmod 600 "$key"
           port="${DEPLOY_PORT:-22}"
-          dest="${DEPLOY_PATH:-offerpath}/apps/api/downloads"
+          dest="${DEPLOY_PATH:-/opt/var/offerpath}/apps/api/downloads"
           ssh_opts=(-i "$key" -o StrictHostKeyChecking=accept-new)
           # Null-delimited: installer names can contain spaces.
           mapfile -d '' files < <(find artifacts \( -name '*.apk' -o -name '*-setup.exe' -o -name '*-setup.exe.sig' \) -print0)
@@ -207,7 +207,7 @@ jobs:
           key="$RUNNER_TEMP/deploy_key"
           printf '%s\n' "$DEPLOY_SSH_KEY" > "$key"
           chmod 600 "$key"
-          repo="${DEPLOY_PATH:-offerpath}"
+          repo="${DEPLOY_PATH:-/opt/var/offerpath}"
           ssh -i "$key" -o StrictHostKeyChecking=accept-new -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
             "cd \"$repo\" && git pull --ff-only && bash scripts/server-update.sh"
           rm -f "$key"

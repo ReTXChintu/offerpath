@@ -55,7 +55,7 @@ Repository → Settings → Secrets and variables → Actions.
 | `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` | Strongly recommended | The release signing key (below). Without it every APK must be installed fresh. |
 | `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, `TAURI_UPDATER_PUBKEY` | Recommended | Lets the desktop install its own updates |
 | `GOOGLE_SERVICES_JSON` | For phone push | base64 of the Firebase `google-services.json` for package `app.offerpath.mobile` |
-| `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY`, `DEPLOY_PORT`, `DEPLOY_PATH` | Optional | With them, a release uploads the builds and runs `scripts/server-update.sh` on the server (`DEPLOY_PATH` defaults to `offerpath`) |
+| `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY`, `DEPLOY_PORT`, `DEPLOY_PATH` | Optional | With them, a release uploads the builds and runs `scripts/server-update.sh` on the server (`DEPLOY_PATH` defaults to `/opt/var/offerpath`) |
 
 Keys, made once and kept safe (lose one and installed apps can't be updated):
 
