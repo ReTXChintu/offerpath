@@ -10,8 +10,10 @@ import {
 } from '@offerpath/hunt';
 import {
   InterviewGuide,
+  InterviewPrepList,
   Onboarding,
   PracticePage,
+  PrepCreate,
   RecallPage,
   RoadmapPage,
   Technologies,
@@ -30,6 +32,7 @@ import {
   ConceptRoute,
   DesktopProgress,
   ExerciseRoute,
+  InterviewPrepRoute,
   InterviewRoute,
   ProjectRoute,
   RequireAccount,
@@ -66,6 +69,9 @@ const routeTree = rootRoute.addChildren([
   learn('/recall', RecallPage),
   learn('/interviews', InterviewGuide),
   learn('/interviews/$interviewId', InterviewRoute),
+  learn('/interview-prep', InterviewPrepList),
+  learn('/interview-prep/new', PrepCreate),
+  learn('/interview-prep/$prepId', InterviewPrepRoute),
   learn('/progress', DesktopProgress),
   learn('/onboarding', Onboarding),
   // Hunt: @offerpath/hunt's pages over the Tauri client.

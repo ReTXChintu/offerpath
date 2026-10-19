@@ -27,9 +27,14 @@ export const learnPaths = {
   recall: '/recall',
   interviews: '/interviews',
   interview: (interviewId: string) => `/interviews/${encodeURIComponent(interviewId)}`,
+  // Interview prep: a real interview's plan and likely questions.
+  interviewPreps: '/interview-prep',
+  interviewPrepNew: '/interview-prep/new',
+  interviewPrep: (prepId: string) => `/interview-prep/${encodeURIComponent(prepId)}`,
   progress: '/progress',
   onboarding: '/onboarding',
   settings: '/settings?tab=goal',
+  aiSettings: '/settings?tab=ai',
   // The hunt's pages, which Today links to (both hosts serve them here).
   applications: '/applications',
   application: (applicationId: string) => `/applications/${encodeURIComponent(applicationId)}`,

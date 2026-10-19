@@ -172,7 +172,15 @@ describe('desktop shell', () => {
   it('has the sidebar of plan section 5.2', async () => {
     renderApp('/');
     const nav = await screen.findByRole('navigation', { name: 'Main' });
-    for (const label of ['Today', 'Roadmap', 'Learn', 'Practice', 'Recall', 'Interviews']) {
+    for (const label of [
+      'Today',
+      'Roadmap',
+      'Learn',
+      'Practice',
+      'Recall',
+      'Interviews',
+      'Interview prep',
+    ]) {
       expect(within(nav).getByRole('link', { name: label })).toBeInTheDocument();
     }
     for (const label of ['Jobs', 'Applications', 'Job sites', 'Progress']) {

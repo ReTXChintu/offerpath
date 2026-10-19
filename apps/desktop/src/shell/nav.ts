@@ -31,6 +31,12 @@ export const GROW: NavSection = {
     { path: '/practice', label: 'Practice', icon: 'practice', keywords: 'exercises coding' },
     { path: '/recall', label: 'Recall', icon: 'brain', keywords: 'review flashcards' },
     { path: '/interviews', label: 'Interviews', icon: 'interview', keywords: 'mock' },
+    {
+      path: '/interview-prep',
+      label: 'Interview prep',
+      icon: 'calendarPlus',
+      keywords: 'job description questions plan practise upcoming',
+    },
   ],
 };
 
@@ -63,6 +69,12 @@ export const BOTTOM: NavEntry[] = [
 
 /** Pages reached from other pages (and the palette) rather than the sidebar. */
 export const MORE: NavEntry[] = [
+  {
+    path: '/interview-prep/new',
+    label: 'Prepare for an interview',
+    icon: 'plus',
+    keywords: 'new interview prep job description',
+  },
   { path: '/hunt', label: 'Hunt overview', icon: 'dashboard', keywords: 'dashboard' },
   { path: '/candidate', label: 'Candidate profile', icon: 'user', keywords: 'skills experience' },
   { path: '/resumes', label: 'Resumes', icon: 'fileText', keywords: 'cv master' },
