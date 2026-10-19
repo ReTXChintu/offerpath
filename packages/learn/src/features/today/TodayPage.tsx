@@ -25,6 +25,7 @@ import {
   type TodayPlanView,
 } from '../../lib/plan';
 import { useStartInterview } from '../../lib/queries';
+import { UpcomingPreps } from '../interview-prep/UpcomingPreps';
 import { RoutineSection } from '../routine/RoutineSection';
 
 /**
@@ -95,6 +96,7 @@ export function TodayPage({ agent }: { agent?: ReactNode }) {
             <RoutineSection routine={plan.learning} />
           </Panel>
           <HuntTodos plan={plan} />
+          <UpcomingPreps />
           <Interviews interviews={plan.interviews} />
         </div>
 

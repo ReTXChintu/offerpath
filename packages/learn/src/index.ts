@@ -29,6 +29,14 @@ export {
 export { copyText, randomId } from './lib/browser';
 export * from './lib/queries';
 export * from './lib/plan';
+export * from './lib/interview-prep';
+export {
+  countdown,
+  formatWhen,
+  isoToLocalInputs,
+  localDateTimeToIso,
+  toOffsetIso,
+} from './lib/when';
 export {
   AI_OFFLINE_MESSAGE,
   AiOfflineNotice,
@@ -58,5 +66,15 @@ export { RecallPage } from './features/recall/RecallPage';
 export { ProgressPage } from './features/progress/ProgressPage';
 export { FunnelPanel, type FunnelCounts } from './features/progress/FunnelPanel';
 export { LearningSettings, GoalEditor } from './features/settings/Settings';
+export { AiFallbackSettings } from './features/settings/AiFallback';
+export { InterviewPrepList } from './features/interview-prep/PrepList';
+export {
+  PrepCreate,
+  validatePrepDraft,
+  type PrepDraft,
+} from './features/interview-prep/PrepCreate';
+export { PrepDetail } from './features/interview-prep/PrepDetail';
+export { UpcomingPreps } from './features/interview-prep/UpcomingPreps';
+export { AI_SOURCE_MESSAGE } from './features/interview-prep/shared';
 export { TodayPage } from './features/today/TodayPage';
 export { DesktopOfflineStrip } from './features/today/DesktopOfflineStrip';
