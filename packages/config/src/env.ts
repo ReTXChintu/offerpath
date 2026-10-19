@@ -79,6 +79,15 @@ export const envSchema = z
      * plan limits, which the job hunt shares. 0 means no limit.
      */
     AI_DAILY_TOKEN_BUDGET: z.coerce.number().int().min(0).default(0),
+    /**
+     * Encrypts the OpenAI fallback keys users save in Settings (AES-256-GCM).
+     * Without it the fallback can't be saved; Claude on the desktop still works.
+     * Changing it makes every saved key unreadable. `openssl rand -base64 32`.
+     */
+    ENCRYPTION_KEY: z.string().default(''),
+    /** OpenAI models the fallback uses when a user hasn't picked their own. */
+    OPENAI_FALLBACK_MODEL_FAST: z.string().default('gpt-4.1-mini'),
+    OPENAI_FALLBACK_MODEL_REASONING: z.string().default('gpt-4.1'),
 
     /** A phone's pairing code, shown on the desktop as a QR code, lives this long. */
     PAIRING_CODE_TTL_SECS: z.coerce.number().int().min(30).max(3_600).default(300),

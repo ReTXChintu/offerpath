@@ -15,7 +15,7 @@ its only AI**.
 | | Decision |
 |---|---|
 | Repo | New repository. Job Hunter and ForgeRoutine are archived read-only once the cutover is done. |
-| AI | Claude CLI only, run on the user's own desktop. No API keys, no OpenAI / Anthropic API / Gemini / Codex. The server never runs AI. |
+| AI | Claude CLI, run on the user's own desktop. Exception (2026-10-19): interview prep falls back to the user's own OpenAI key when their desktop is offline. No server-wide key; no Anthropic API / Gemini / Codex. |
 | Surfaces | Desktop (everything), Web (supporter: mostly the learning side), Mobile (on the go), API. |
 | Server | Same box (`187.127.179.114`). Job Hunter and ForgeRoutine are removed from it after the data is moved; Offerpath takes their place. |
 | Database | PostgreSQL on Neon (external, free tier; sleeping when idle is fine). ForgeRoutine's database is already on Neon. MongoDB Atlas is retired after migration. |

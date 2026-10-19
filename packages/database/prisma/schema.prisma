@@ -41,6 +41,8 @@ model User {
   aiJobs            AiJob[]
   goal              Goal?
   dailyPlans        DailyPlan[]
+  aiFallbackKey     AiFallbackKey?
+  interviewPreps    InterviewPrep[]
   conceptChats      ConceptChatMessage[]
   questionAnswers   ConceptQuestionAnswer[]
   assignments       PracticeAssignment[]
@@ -1465,4 +1467,87 @@ model DailyPlan {
 
   @@unique([userId, date])
   @@map("daily_plans")
+}
+
+// ===========================================================================
+// The OpenAI fallback and interview prep
+// ===========================================================================
+
+/// The user's own OpenAI key, used only when their desktop (Claude) is
+/// offline. Encrypted at rest (AES-256-GCM with ENCRYPTION_KEY); the API
+/// never returns it, only its last four characters.
+model AiFallbackKey {
+  userId         String   @id
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  keyCipher      String
+  keyLast4       String
+  /// OpenAI model ids; null uses the server's defaults.
+  modelFast      String?
+  modelReasoning String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("ai_fallback_keys")
+}
+
+enum InterviewPrepStatus {
+  GENERATING
+  READY
+  FAILED
+}
+
+enum PrepQuestionKind {
+  TECHNICAL
+  SYSTEM_DESIGN
+  CODING
+  BEHAVIORAL
+  COMPANY
+}
+
+/// One real interview the user is preparing for: a job description and/or
+/// technologies, and when it is. AI writes the plan and the questions.
+model InterviewPrep {
+  id             String              @id @default(cuid())
+  userId         String
+  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company        String?
+  role           String?
+  jobDescription String?
+  technologies   String[]            @default([])
+  scheduledAt    DateTime
+  status         InterviewPrepStatus @default(GENERATING)
+  error          String?
+  /// { summary, focusAreas[], schedule[] } from the prep agent.
+  plan           Json?
+  /// "desktop" (Claude) or "openai" (the fallback), for the UI.
+  generatedBy    String?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  questions InterviewPrepQuestion[]
+
+  @@index([userId, scheduledAt])
+  @@map("interview_preps")
+}
+
+model InterviewPrepQuestion {
+  id         String           @id @default(cuid())
+  prepId     String
+  prep       InterviewPrep    @relation(fields: [prepId], references: [id], onDelete: Cascade)
+  order      Int
+  kind       PrepQuestionKind
+  topic      String
+  question   String
+  keyPoints  String[]
+  difficulty Int
+  /// The user's latest practice answer and its grade.
+  answer     String?
+  score      Int?
+  /// { covered[], missed[], feedback } from the grader.
+  feedback   Json?
+  answeredAt DateTime?
+  createdAt  DateTime         @default(now())
+
+  @@index([prepId, order])
+  @@map("interview_prep_questions")
 }

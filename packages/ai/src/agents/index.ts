@@ -10,3 +10,4 @@ export * from './interviewer.agent.js';
 export * from './engineering.agent.js';
 export * from './concept.agent.js';
 export * from './practice-set.agent.js';
+export * from './interview-prep.agent.js';
