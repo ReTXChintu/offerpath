@@ -2,7 +2,7 @@ import 'dart:convert';
 
 /// Where tapping a notification (in the Alerts tab, a system notification,
 /// or a Firebase push) takes the user.
-enum LinkKind { application, applications, jobs, jobSites, home }
+enum LinkKind { application, applications, jobs, jobSites, interviewPrep, interviewPreps, home }
 
 class AppLink {
   final LinkKind kind;
@@ -34,6 +34,11 @@ AppLink resolveLink(String? linkPage, String? linkId) {
     case 'job-sites':
     case 'job_sites':
       return const AppLink(LinkKind.jobSites);
+    // INTERVIEW_PREP_READY: `linkId` is the prep's id.
+    case 'interview-prep':
+    case 'interview_prep':
+    case 'interview-preps':
+      return id == null ? const AppLink(LinkKind.interviewPreps) : AppLink(LinkKind.interviewPrep, id);
     default:
       return const AppLink(LinkKind.home);
   }
@@ -65,12 +70,13 @@ const tabToday = 0, tabLearn = 1, tabHunt = 2, tabAlerts = 3, tabMore = 4;
 const huntApplications = 0, huntJobs = 1;
 
 /// The Learn tab's pages.
-const learnRoutine = 0, learnRecall = 1, learnInterviews = 2, learnReading = 3;
+const learnRoutine = 0, learnRecall = 1, learnInterviews = 2, learnPrep = 3, learnReading = 4;
 
 /// The tab a link lands on (an application detail opens over Hunt, job
-/// sites over More).
+/// sites over More, an interview prep over Learn).
 int tabFor(AppLink link) => switch (link.kind) {
       LinkKind.application || LinkKind.applications || LinkKind.jobs => tabHunt,
       LinkKind.jobSites => tabMore,
+      LinkKind.interviewPrep || LinkKind.interviewPreps => tabLearn,
       LinkKind.home => tabToday,
     };

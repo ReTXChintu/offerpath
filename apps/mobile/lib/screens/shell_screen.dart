@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../logic/filters.dart';
 import '../learn/learn_screen.dart';
+import '../learn/prep_detail_page.dart';
 import '../logic/links.dart';
 import '../services/link_bus.dart';
 import '../state/applications_controller.dart';
@@ -33,20 +34,37 @@ void openAppLink(BuildContext context, AppLink link) {
     case LinkKind.jobSites:
       nav.select(tabMore);
       Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const JobSitesScreen()));
+    case LinkKind.interviewPrep:
+      nav.openLearn(learnPrep);
+      openPrep(context, link.id!);
+    case LinkKind.interviewPreps:
+      nav.openLearn(learnPrep);
     case LinkKind.home:
       nav.select(tabToday);
   }
 }
 
 /// The signed-in shell (plan section 5.4): Today, Learn, Hunt, Alerts, More.
-class AppShell extends StatefulWidget {
+class AppShell extends StatelessWidget {
   const AppShell({super.key});
 
   @override
-  State<AppShell> createState() => _AppShellState();
+  Widget build(BuildContext context) => const AppLinkListener(child: _Shell());
 }
 
-class _AppShellState extends State<AppShell> {
+/// Opens the screens notification taps link to ([LinkBus]): the ones tapped
+/// while [child] is up, and the one that launched the app (a cold start),
+/// taken once the first frame is drawn.
+class AppLinkListener extends StatefulWidget {
+  const AppLinkListener({required this.child, super.key});
+
+  final Widget child;
+
+  @override
+  State<AppLinkListener> createState() => _AppLinkListenerState();
+}
+
+class _AppLinkListenerState extends State<AppLinkListener> {
   StreamSubscription<AppLink>? _linkSub;
 
   @override
@@ -71,6 +89,13 @@ class _AppShellState extends State<AppShell> {
     _linkSub?.cancel();
     super.dispose();
   }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
+class _Shell extends StatelessWidget {
+  const _Shell();
 
   @override
   Widget build(BuildContext context) {

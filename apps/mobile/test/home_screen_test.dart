@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:offerpath_mobile/models/dashboard.dart';
 import 'package:offerpath_mobile/models/envelope.dart';
+import 'package:offerpath_mobile/models/interview_prep.dart';
 import 'package:offerpath_mobile/screens/home_screen.dart';
 import 'package:offerpath_mobile/screens/queue_screen.dart';
 import 'package:offerpath_mobile/state/agent_controller.dart';
 import 'package:offerpath_mobile/state/applications_controller.dart';
 import 'package:offerpath_mobile/state/auth_controller.dart';
 import 'package:offerpath_mobile/state/connection_controller.dart';
+import 'package:offerpath_mobile/state/interview_prep_controller.dart';
 import 'package:offerpath_mobile/state/learning_controller.dart';
 import 'package:offerpath_mobile/state/nav_controller.dart';
 import 'package:offerpath_mobile/state/queue_controller.dart';
@@ -15,8 +17,9 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/fakes.dart';
+import 'support/prep_fixtures.dart';
 
-Future<(FakeConnectionController, QueueController)> pumpHome(WidgetTester tester, {Widget? home}) async {
+Future<(FakeConnectionController, QueueController)> pumpHome(WidgetTester tester, {Widget? home, void Function(InterviewPrepController)? preps}) async {
   SharedPreferences.setMockInitialValues({});
   tester.view.physicalSize = const Size(1080, 2400);
   tester.view.devicePixelRatio = 2;
@@ -31,6 +34,8 @@ Future<(FakeConnectionController, QueueController)> pumpHome(WidgetTester tester
   fake.stubbed['remove_queued_task'] = const RelayResponse(ok: true, data: {'removed': true});
   fake.agentStatus = const AgentStatusLite(state: 'DISCOVERING', paused: false, runKind: 'JOB_HUNT', queued: 2);
   final queue = QueueController(fake);
+  final prepController = InterviewPrepController(auth, fake);
+  preps?.call(prepController);
   await tester.pumpWidget(MultiProvider(
     providers: [
       ChangeNotifierProvider<AuthController>.value(value: auth),
@@ -40,6 +45,7 @@ Future<(FakeConnectionController, QueueController)> pumpHome(WidgetTester tester
       ChangeNotifierProvider<QueueController>.value(value: queue),
       ChangeNotifierProvider<NavController>.value(value: NavController()),
       ChangeNotifierProvider<LearningController>.value(value: LearningController(auth)),
+      ChangeNotifierProvider<InterviewPrepController>.value(value: prepController),
     ],
     child: MaterialApp(home: home ?? const HomeScreen()),
   ));
@@ -60,6 +66,20 @@ void main() {
     for (final action in ['Start job hunt', 'Prepare applications', 'Search only', 'Find hiring posts', 'Company careers', 'Scan Telegram', 'Check Gmail', 'Apply from a link', 'Add a job I found']) {
       expect(find.text(action), findsOneWidget, reason: action);
     }
+  });
+
+  testWidgets('Today shows interview prep for the next 14 days only', (tester) async {
+    final now = DateTime.now().toUtc();
+    await pumpHome(tester, preps: (c) {
+      c.put(Prep.fromJson(prepJson(id: 'soon', scheduledAt: now.add(const Duration(days: 3)).toIso8601String())));
+      c.put(Prep.fromJson(prepJson(id: 'later', company: 'Globex', scheduledAt: now.add(const Duration(days: 30)).toIso8601String())));
+    });
+    expect(find.text('Interview prep'), findsOneWidget);
+    expect(find.text('1 in the next 14 days'), findsOneWidget);
+    expect(find.text('Frontend developer at Acme'), findsOneWidget);
+    expect(find.text('Frontend developer at Globex'), findsNothing);
+    expect(find.textContaining('in 3 days'), findsOneWidget);
+    expect(find.text('0 of 3 practised'), findsOneWidget);
   });
 
   testWidgets('the Queue screen lists tasks in order and removes one on the desktop', (tester) async {

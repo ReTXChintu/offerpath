@@ -3,12 +3,15 @@ import 'package:provider/provider.dart';
 
 import '../logic/filters.dart';
 import '../logic/labels.dart';
+import '../learn/prep_detail_page.dart';
+import '../learn/prep_widgets.dart';
 import '../logic/links.dart';
 import '../models/application.dart';
 import '../models/envelope.dart';
 import '../state/agent_controller.dart';
 import '../state/applications_controller.dart';
 import '../state/connection_controller.dart';
+import '../state/interview_prep_controller.dart';
 import '../state/learning_controller.dart';
 import '../state/nav_controller.dart';
 import '../state/queue_controller.dart';
@@ -31,7 +34,8 @@ class HomeScreen extends StatelessWidget {
     final agent = context.read<AgentController>();
     final queue = context.read<QueueController>();
     final learning = context.read<LearningController>();
-    await Future.wait([apps.refresh(), agent.refreshStatus(), queue.refresh(), learning.refresh()]);
+    final preps = context.read<InterviewPrepController>();
+    await Future.wait([apps.refresh(), agent.refreshStatus(), queue.refresh(), learning.refresh(), preps.refresh()]);
   }
 
   @override
@@ -50,6 +54,7 @@ class HomeScreen extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 28),
               sliver: SliverList.list(children: const [
                 _TodayLearning(),
+                _InterviewPrepCard(),
                 _QueueCard(),
                 _UpcomingInterviews(),
                 _WaitingOnYou(),
@@ -290,6 +295,34 @@ class _TodayLearningState extends State<_TodayLearning> {
             Icon(Icons.chevron_right, color: theme.colorScheme.onSurfaceVariant),
           ]),
         ),
+      ],
+    );
+  }
+}
+
+/// Interviews being prepared for in the next two weeks: when, how long
+/// until, and how far the practice has got. Hidden when there are none.
+class _InterviewPrepCard extends StatelessWidget {
+  const _InterviewPrepCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final preps = context.watch<InterviewPrepController>();
+    final upcoming = preps.upcoming;
+    if (upcoming.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SectionHeader(
+          'Interview prep',
+          subtitle: '${upcoming.length} in the next 14 days',
+          action: TextButton(onPressed: () => context.read<NavController>().openLearn(learnPrep), child: const Text('See all')),
+        ),
+        for (final prep in upcoming.take(3))
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: PrepTile(prep: prep, onTap: () => openPrep(context, prep.id)),
+          ),
       ],
     );
   }

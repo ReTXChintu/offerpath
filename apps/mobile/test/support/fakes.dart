@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:offerpath_mobile/models/envelope.dart';
 import 'package:offerpath_mobile/state/connection_controller.dart';
 
@@ -14,6 +16,13 @@ class FakeConnectionController extends ConnectionController {
   final Map<String, RelayResponse> stubbed = {};
   final Map<String, dynamic> serverData = {};
   final List<String> serverReads = [];
+
+  /// `changed` frames a test pushes as if the hub sent them.
+  final _changed = StreamController<ChangedUpdate>.broadcast();
+  void pushChanged(List<String> collections) => _changed.add(ChangedUpdate(collections));
+
+  @override
+  Stream<ChangedUpdate> get changed => _changed.stream;
 
   @override
   Future<RelayResponse> request(String type, [Map<String, dynamic> payload = const {}]) async {

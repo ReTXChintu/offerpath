@@ -8,6 +8,7 @@ import 'state/agent_controller.dart';
 import 'state/applications_controller.dart';
 import 'state/auth_controller.dart';
 import 'state/connection_controller.dart';
+import 'state/interview_prep_controller.dart';
 import 'state/jobs_controller.dart';
 import 'state/learning_controller.dart';
 import 'state/nav_controller.dart';
@@ -50,6 +51,10 @@ Future<void> main() async {
           create: (context) => NotificationsController(auth, context.read<ConnectionController>()),
           update: (_, connection, previous) => previous ?? NotificationsController(auth, connection),
           lazy: false,
+        ),
+        ChangeNotifierProxyProvider<ConnectionController, InterviewPrepController>(
+          create: (context) => InterviewPrepController(auth, context.read<ConnectionController>()),
+          update: (_, connection, previous) => previous ?? InterviewPrepController(auth, connection),
         ),
         ChangeNotifierProxyProvider<ConnectionController, ApplicationsController>(
           create: (context) => ApplicationsController(context.read<ConnectionController>()),
