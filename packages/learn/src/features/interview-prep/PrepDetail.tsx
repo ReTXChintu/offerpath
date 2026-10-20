@@ -4,8 +4,6 @@ import {
   Button,
   ConfirmDialog,
   Dialog,
-  Field,
-  Input,
   PageHeader,
   Panel,
   ProgressBar,
@@ -17,14 +15,17 @@ import { useState } from 'react';
 
 import { describeError } from '../../components/AiOffline';
 import { Spinner } from '../../components/ui';
-import { learnPaths, useLearnNavigate } from '../../context';
+import { learnPaths, LearnLink, useLearnNavigate } from '../../context';
 import {
   useDeletePrep,
   useInterviewPrep,
   usePrepAiSource,
   useRegeneratePrep,
+  useStartMockInterview,
   useUpdatePrep,
+  type MockInterviewSummary,
   type PrepPlan,
+  type PrepUpdate,
   type PrepView,
 } from '../../lib/interview-prep';
 import {
@@ -33,11 +34,18 @@ import {
   formatWhen,
   isoToLocalInputs,
   isPast,
-  localDateTimeToIso,
   sameDay,
   startOfDay,
 } from '../../lib/when';
 
+import {
+  cvDraftFrom,
+  PrepFields,
+  resumeFromDraft,
+  validatePrepDraft,
+  type PrepDraft,
+  type PrepErrors,
+} from './PrepCreate';
 import { PrepQuestionCard } from './PrepQuestion';
 import {
   AiSourceNotice,
@@ -45,9 +53,12 @@ import {
   generatedByLabel,
   KIND_ORDER,
   kindLabel,
+  MockStatusBadge,
   PrepStatusBadge,
   prepTitle,
   scoreVariant,
+  stageLabel,
+  VerdictBadge,
 } from './shared';
 
 /**
@@ -120,6 +131,7 @@ export function PrepDetail({ prepId }: { prepId: string }) {
             >
               All preps
             </Button>
+            {prep.status === 'READY' ? <MockInterviewButton prep={prep} /> : null}
             <Button icon="pencil" onClick={() => setEditing(true)}>
               Edit
             </Button>
@@ -229,6 +241,7 @@ function Ready({ prep }: { prep: PrepView }) {
   return (
     <div className="prep-layout">
       <div className="col g4" style={{ minWidth: 0 }}>
+        <MockInterviewsPanel prep={prep} />
         <Panel title="Your practice">
           <div className="grid grid-2 g3">
             <Stat label="Answered" value={`${answered}/${total}`} />
@@ -416,26 +429,158 @@ function Questions({ prep }: { prep: PrepView }) {
   );
 }
 
+/**
+ * Starts the prep's mock interview, or goes back to the one in progress.
+ * The opening question is there at once, so this only waits on the server.
+ */
+export function MockInterviewButton({
+  prep,
+  size,
+  variant = 'primary',
+}: {
+  prep: Pick<PrepView, 'id' | 'mockInterviews'>;
+  size?: 'sm' | 'md';
+  variant?: 'primary' | 'secondary';
+}) {
+  const navigate = useLearnNavigate();
+  const start = useStartMockInterview(prep.id);
+  const current = (prep.mockInterviews ?? []).find((m) => m.status === 'IN_PROGRESS');
+  return (
+    <>
+      <Button
+        variant={variant}
+        size={size}
+        icon={current ? 'play' : 'mic'}
+        loading={start.isPending}
+        onClick={() =>
+          current
+            ? navigate(learnPaths.mockInterview(current.id))
+            : start.mutate({}, { onSuccess: (view) => navigate(learnPaths.mockInterview(view.id)) })
+        }
+      >
+        {current ? 'Continue mock interview' : 'Start mock interview'}
+      </Button>
+      {start.error ? (
+        <span className="t-caption text-error" role="alert">
+          {describeError(start.error)}
+        </span>
+      ) : null}
+    </>
+  );
+}
+
+/** The mock interviews so far, newest first, each linking to its transcript and report. */
+function MockInterviewsPanel({ prep }: { prep: PrepView }) {
+  const interviews = prep.mockInterviews ?? [];
+  return (
+    <Panel title="Mock interview">
+      <div className="t-small">
+        A live interview with an AI interviewer who has read your CV and the job: an intro,
+        technical questions, coding, then a wrap-up. It corrects your grammar as you go and writes a
+        report at the end.
+      </div>
+      {interviews.length > 0 ? (
+        <ul className="prep-mock-list mt3" aria-label="Past mock interviews">
+          {interviews.map((m) => (
+            <MockInterviewRow key={m.id} interview={m} />
+          ))}
+        </ul>
+      ) : (
+        <div className="t-caption mt3">No mock interviews yet.</div>
+      )}
+    </Panel>
+  );
+}
+
+function MockInterviewRow({ interview }: { interview: MockInterviewSummary }) {
+  return (
+    <li>
+      <LearnLink to={learnPaths.mockInterview(interview.id)} className="prep-mock-row">
+        <div style={{ minWidth: 0 }}>
+          <div className="t-small" style={{ fontWeight: 600 }}>
+            {formatWhen(interview.startedAt)}
+          </div>
+          <div className="t-caption">
+            {interview.answered} {interview.answered === 1 ? 'answer' : 'answers'}
+            {interview.status === 'IN_PROGRESS' ? ` · ${stageLabel(interview.stage)}` : ''}
+          </div>
+        </div>
+        <div className="row items-center g2 wrap" style={{ justifyContent: 'flex-end' }}>
+          {interview.overallScore !== null ? (
+            <Badge variant={scoreVariant(interview.overallScore)} size="sm">
+              {formatScore(interview.overallScore)}
+            </Badge>
+          ) : null}
+          {interview.verdict ? <VerdictBadge verdict={interview.verdict} size="sm" /> : null}
+          {interview.status !== 'COMPLETED' ? <MockStatusBadge status={interview.status} /> : null}
+        </div>
+      </LearnLink>
+    </li>
+  );
+}
+
+/** What changed among the fields that make AI write the plan and questions again. */
+export function rewriteChange(prep: PrepView, draft: PrepDraft): Partial<PrepUpdate> {
+  const change: Partial<PrepUpdate> = {};
+  const jobDescription = draft.jobDescription.trim() || null;
+  if (jobDescription !== (prep.jobDescription?.trim() || null)) {
+    change.jobDescription = jobDescription;
+  }
+  const technologies = draft.technologies.map((t) => t.trim()).filter(Boolean);
+  if (technologies.join('\n') !== prep.technologies.join('\n')) change.technologies = technologies;
+  if (draft.includeDsa !== (prep.includeDsa ?? false)) change.includeDsa = draft.includeDsa;
+  const resume = resumeFromDraft(draft.cv);
+  const saved = prep.resume ?? null;
+  const same =
+    resume === null
+      ? saved === null
+      : saved !== null &&
+        saved.text.trim() === resume.text &&
+        saved.source === resume.source &&
+        (resume.source !== 'upload' || (saved.fileName ?? null) === (resume.fileName ?? null));
+  if (!same) change.resume = resume;
+  return change;
+}
+
+/**
+ * Edits the prep with the same fields it was made with. Changing the job
+ * description, technologies, DSA or the CV rewrites the plan and questions,
+ * so that asks first.
+ */
 function EditDialog({ prep, onClose }: { prep: PrepView; onClose: () => void }) {
   const update = useUpdatePrep(prep.id);
-  const initial = isoToLocalInputs(prep.scheduledAt);
-  const [company, setCompany] = useState(prep.company ?? '');
-  const [role, setRole] = useState(prep.role ?? '');
-  const [date, setDate] = useState(initial.date);
-  const [time, setTime] = useState(initial.time);
-  const [error, setError] = useState<string | null>(null);
+  const [draft, setDraft] = useState<PrepDraft>(() => {
+    const initial = isoToLocalInputs(prep.scheduledAt);
+    return {
+      company: prep.company ?? '',
+      role: prep.role ?? '',
+      jobDescription: prep.jobDescription ?? '',
+      technologies: prep.technologies,
+      date: initial.date,
+      time: initial.time,
+      includeDsa: prep.includeDsa ?? false,
+      cv: cvDraftFrom(prep.resume),
+    };
+  });
+  const [errors, setErrors] = useState<PrepErrors>({});
+  const [pending, setPending] = useState<PrepUpdate | null>(null);
+
+  const send = (change: PrepUpdate) =>
+    update.mutate(change, { onSuccess: onClose, onSettled: () => setPending(null) });
 
   const save = () => {
-    const scheduledAt = localDateTimeToIso(date, time);
-    if (!scheduledAt) {
-      setError("Pick the interview's date and time.");
-      return;
-    }
-    setError(null);
-    update.mutate(
-      { company: company.trim() || null, role: role.trim() || null, scheduledAt },
-      { onSuccess: onClose },
-    );
+    const { errors: found, input } = validatePrepDraft(draft, Date.now(), { allowPast: true });
+    setErrors(found);
+    if (!input) return;
+    const rewrite = rewriteChange(prep, draft);
+    const change: PrepUpdate = {
+      company: input.company ?? null,
+      role: input.role ?? null,
+      scheduledAt: input.scheduledAt,
+      ...rewrite,
+    };
+    if (Object.keys(rewrite).length > 0) setPending(change);
+    else send(change);
   };
 
   return (
@@ -443,7 +588,7 @@ function EditDialog({ prep, onClose }: { prep: PrepView; onClose: () => void }) 
       open
       onOpenChange={(open) => !open && onClose()}
       title="Edit the interview"
-      size="md"
+      size="lg"
       dismissable={false}
       footer={
         <>
@@ -457,24 +602,23 @@ function EditDialog({ prep, onClose }: { prep: PrepView; onClose: () => void }) 
       }
     >
       <div className="col g4">
-        <div className="grid grid-halves g3">
-          <Field label="Company">
-            <Input value={company} onChange={(e) => setCompany(e.target.value)} maxLength={120} />
-          </Field>
-          <Field label="Role">
-            <Input value={role} onChange={(e) => setRole(e.target.value)} maxLength={120} />
-          </Field>
-        </div>
-        <div className="grid grid-halves g3">
-          <Field label="Interview date" required error={error ?? undefined}>
-            <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-          </Field>
-          <Field label="Time" required hint="Your local time.">
-            <Input type="time" value={time} onChange={(e) => setTime(e.target.value)} />
-          </Field>
-        </div>
-        {update.error ? <Alert status="error">{describeError(update.error)}</Alert> : null}
+        <PrepFields
+          draft={draft}
+          onChange={setDraft}
+          errors={errors}
+          serverError={update.error}
+          compact
+        />
       </div>
+      <ConfirmDialog
+        open={pending !== null}
+        onOpenChange={(open) => !open && setPending(null)}
+        title="Rewrite the plan and questions?"
+        description="You changed the job description, technologies, DSA or the CV, so AI writes the plan and questions again. Your practice answers on the current questions are lost; mock interviews stay."
+        confirmLabel="Save and rewrite"
+        loading={update.isPending}
+        onConfirm={() => pending && send(pending)}
+      />
     </Dialog>
   );
 }

@@ -6,6 +6,7 @@ import {
   ExerciseWorkspace,
   FunnelPanel,
   InterviewSession,
+  MockInterviewPage,
   PrepDetail,
   ProgressPage,
   ProjectWorkspace,
@@ -127,6 +128,11 @@ export function InterviewRoute() {
 export function InterviewPrepRoute() {
   const { prepId } = useParams({ strict: false }) as { prepId?: string };
   return <PrepDetail key={prepId} prepId={prepId ?? ''} />;
+}
+
+export function MockInterviewRoute() {
+  const { interviewId } = useParams({ strict: false }) as { interviewId?: string };
+  return <MockInterviewPage key={interviewId} interviewId={interviewId ?? ''} />;
 }
 
 /** The hunt's funnel from this desktop's own store. */

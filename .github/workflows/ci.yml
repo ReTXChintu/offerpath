@@ -75,7 +75,9 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://offerpath:offerpath@localhost:5432/offerpath_test?schema=public
           DATABASE_URL: postgresql://offerpath:offerpath@localhost:5432/not_used?schema=public
-        run: pnpm --filter @offerpath/api exec jest --config ./test/jest-e2e.json --runInBand
+        # --experimental-vm-modules: pdf.js (CV upload) loads its worker with a
+        # dynamic import, which jest refuses without it.
+        run: pnpm --filter @offerpath/api exec node --experimental-vm-modules node_modules/jest/bin/jest.js --config ./test/jest-e2e.json --runInBand
 
   rust:
     name: Rust

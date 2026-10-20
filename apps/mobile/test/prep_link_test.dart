@@ -119,6 +119,7 @@ void main() {
       await tester.tap(find.text('Interview prep is ready'));
       await tester.pumpAndSettle();
       expect(find.byType(PrepDetailPage), findsOneWidget);
+      await tester.scrollUntilVisible(find.text('Expect React fundamentals and one system design round.'), 200);
       expect(find.text('Expect React fundamentals and one system design round.'), findsOneWidget);
       expect(nav.tab, tabLearn);
     });

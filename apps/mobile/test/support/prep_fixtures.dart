@@ -39,6 +39,9 @@ Map<String, Object?> prepJson({
   String? error,
   String scheduledAt = '2026-10-25T05:00:00.000Z',
   List<Map<String, Object?>>? questions,
+  bool includeDsa = false,
+  Map<String, Object?>? resume,
+  List<Map<String, Object?>> mockInterviews = const [],
 }) {
   final qs = questions ??
       (status == 'READY'
@@ -79,5 +82,8 @@ Map<String, Object?> prepJson({
       'averageScore': answered.isEmpty ? null : (answered.fold<double>(0, (s, q) => s + (q['score'] as double)) / answered.length),
     },
     'createdAt': '2026-10-19T09:00:00.000Z',
+    'includeDsa': includeDsa,
+    'resume': resume,
+    'mockInterviews': mockInterviews,
   };
 }

@@ -19,6 +19,7 @@ import { PrismaService } from '../../../infrastructure/prisma/prisma.service.js'
 import { HubService } from '../../hub/application/hub.service.js';
 import { PushService } from '../../sync/application/push.service.js';
 
+import { MockInterviewService, type MockInterviewSummary } from './mock-interview.service.js';
 import { NoPrepAiError, PrepAiRouter, type PrepAiSource } from './prep-ai.router.js';
 
 export interface PrepInput {
@@ -26,8 +27,20 @@ export interface PrepInput {
   role?: string | null;
   jobDescription?: string | null;
   technologies?: string[];
+  /** Data structures and algorithms questions and coding problems. */
+  includeDsa?: boolean;
+  /** The CV the user interviews with; null removes it. */
+  resume?: PrepResumeInput | null;
   /** ISO date-time of the interview. */
   scheduledAt: string;
+}
+
+export type ResumeSource = 'upload' | 'profile' | 'pasted';
+
+export interface PrepResumeInput {
+  text: string;
+  source: ResumeSource;
+  fileName?: string | null;
 }
 
 export interface PrepQuestionView {
@@ -51,6 +64,8 @@ export interface PrepView {
   role: string | null;
   jobDescription: string | null;
   technologies: string[];
+  includeDsa: boolean;
+  resume: { source: ResumeSource; fileName: string | null; chars: number; text: string } | null;
   scheduledAt: string;
   status: 'GENERATING' | 'READY' | 'FAILED';
   error: string | null;
@@ -59,6 +74,8 @@ export interface PrepView {
   questions: PrepQuestionView[];
   /** Answered questions and their average score, 0-10. */
   progress: { answered: number; total: number; averageScore: number | null };
+  /** Newest first. */
+  mockInterviews: MockInterviewSummary[];
   createdAt: string;
 }
 
@@ -86,6 +103,7 @@ export class InterviewPrepService implements OnApplicationBootstrap, OnModuleDes
     private readonly ai: PrepAiRouter,
     private readonly hub: HubService,
     private readonly push: PushService,
+    private readonly mocks: MockInterviewService,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -106,15 +124,9 @@ export class InterviewPrepService implements OnApplicationBootstrap, OnModuleDes
   // -- Preps ----------------------------------------------------------------
 
   async create(userId: string, input: PrepInput): Promise<PrepView> {
-    const technologies = [
-      ...new Set((input.technologies ?? []).map((t) => t.trim()).filter(Boolean)),
-    ].slice(0, 20);
+    const technologies = cleanTechnologies(input.technologies);
     const jobDescription = input.jobDescription?.trim() || null;
-    if (!jobDescription && technologies.length === 0) {
-      throw Problems.validation({
-        jobDescription: ['Add the job description, or the technologies to prepare.'],
-      });
-    }
+    assertSomethingToPrepare(jobDescription, technologies);
     const prep = await this.prisma.interviewPrep.create({
       data: {
         userId,
@@ -122,6 +134,8 @@ export class InterviewPrepService implements OnApplicationBootstrap, OnModuleDes
         role: input.role?.trim() || null,
         jobDescription,
         technologies,
+        includeDsa: input.includeDsa ?? false,
+        ...resumeData(input.resume ?? null),
         scheduledAt: new Date(input.scheduledAt),
       },
     });
@@ -135,7 +149,8 @@ export class InterviewPrepService implements OnApplicationBootstrap, OnModuleDes
       orderBy: { scheduledAt: 'asc' },
       include: { questions: { orderBy: { order: 'asc' } } },
     });
-    return preps.map((p) => toView(p, p.questions));
+    const mocks = await this.mocks.summaries(preps.map((p) => p.id));
+    return preps.map((p) => toView(p, p.questions, mocks.get(p.id) ?? []));
   }
 
   async get(userId: string, id: string): Promise<PrepView> {
@@ -144,19 +159,58 @@ export class InterviewPrepService implements OnApplicationBootstrap, OnModuleDes
       include: { questions: { orderBy: { order: 'asc' } } },
     });
     if (!prep) throw Problems.notFound('Interview prep');
-    return toView(prep, prep.questions);
+    const mocks = await this.mocks.summaries([prep.id]);
+    return toView(prep, prep.questions, mocks.get(prep.id) ?? []);
   }
 
+  /**
+   * Company, role and date change in place. A new job description,
+   * technologies, DSA choice or CV rewrites the plan and the questions.
+   */
   async update(userId: string, id: string, input: Partial<PrepInput>): Promise<PrepView> {
-    await this.get(userId, id);
+    const prep = await this.prisma.interviewPrep.findFirst({ where: { id, userId } });
+    if (!prep) throw Problems.notFound('Interview prep');
+
+    let jobDescription = prep.jobDescription;
+    let technologies = prep.technologies;
+    const content: Prisma.InterviewPrepUpdateInput = {};
+    if (input.jobDescription !== undefined) {
+      const next = input.jobDescription?.trim() || null;
+      if (next !== prep.jobDescription) content.jobDescription = jobDescription = next;
+    }
+    if (input.technologies !== undefined) {
+      const next = cleanTechnologies(input.technologies);
+      if (next.join('\n') !== prep.technologies.join('\n')) {
+        content.technologies = technologies = next;
+      }
+    }
+    if (input.includeDsa !== undefined && input.includeDsa !== prep.includeDsa) {
+      content.includeDsa = input.includeDsa;
+    }
+    if (input.resume !== undefined) {
+      const resume = resumeData(input.resume);
+      if (
+        resume.resumeText !== prep.resumeText ||
+        resume.resumeSource !== prep.resumeSource ||
+        resume.resumeFileName !== prep.resumeFileName
+      ) {
+        Object.assign(content, resume);
+      }
+    }
+    assertSomethingToPrepare(jobDescription, technologies);
+    const rewrite = Object.keys(content).length > 0;
+
     await this.prisma.interviewPrep.update({
       where: { id },
       data: {
+        ...content,
         ...(input.scheduledAt ? { scheduledAt: new Date(input.scheduledAt) } : {}),
         ...(input.company !== undefined ? { company: input.company?.trim() || null } : {}),
         ...(input.role !== undefined ? { role: input.role?.trim() || null } : {}),
+        ...(rewrite ? { status: 'GENERATING' as const, error: null } : {}),
       },
     });
+    if (rewrite) void this.generate(userId, id);
     return this.get(userId, id);
   }
 
@@ -194,6 +248,8 @@ export class InterviewPrepService implements OnApplicationBootstrap, OnModuleDes
             role: prep.role,
             jobDescription: prep.jobDescription,
             technologies: prep.technologies,
+            resume: prep.resumeText,
+            includeDsa: prep.includeDsa,
             daysUntil,
           },
           { userId },
@@ -354,7 +410,37 @@ function toQuestionView(q: InterviewPrepQuestion): PrepQuestionView {
   };
 }
 
-function toView(prep: InterviewPrep, questions: InterviewPrepQuestion[]): PrepView {
+function cleanTechnologies(list: string[] | undefined): string[] {
+  return [...new Set((list ?? []).map((t) => t.trim()).filter(Boolean))].slice(0, 20);
+}
+
+function assertSomethingToPrepare(jobDescription: string | null, technologies: string[]): void {
+  if (!jobDescription && technologies.length === 0) {
+    throw Problems.validation({
+      jobDescription: ['Add the job description, or the technologies to prepare.'],
+    });
+  }
+}
+
+function resumeData(resume: PrepResumeInput | null): {
+  resumeText: string | null;
+  resumeSource: string | null;
+  resumeFileName: string | null;
+} {
+  const text = resume?.text.trim();
+  if (!resume || !text) return { resumeText: null, resumeSource: null, resumeFileName: null };
+  return {
+    resumeText: text.slice(0, 30_000),
+    resumeSource: resume.source,
+    resumeFileName: resume.source === 'upload' ? resume.fileName?.trim() || null : null,
+  };
+}
+
+function toView(
+  prep: InterviewPrep,
+  questions: InterviewPrepQuestion[],
+  mockInterviews: MockInterviewSummary[],
+): PrepView {
   const answered = questions.filter((q) => q.score !== null);
   return {
     id: prep.id,
@@ -362,6 +448,15 @@ function toView(prep: InterviewPrep, questions: InterviewPrepQuestion[]): PrepVi
     role: prep.role,
     jobDescription: prep.jobDescription,
     technologies: prep.technologies,
+    includeDsa: prep.includeDsa,
+    resume: prep.resumeText
+      ? {
+          source: (prep.resumeSource as ResumeSource | null) ?? 'pasted',
+          fileName: prep.resumeFileName,
+          chars: prep.resumeText.length,
+          text: prep.resumeText,
+        }
+      : null,
     scheduledAt: prep.scheduledAt.toISOString(),
     status: prep.status,
     error: prep.error,
@@ -377,6 +472,7 @@ function toView(prep: InterviewPrep, questions: InterviewPrepQuestion[]): PrepVi
             10
           : null,
     },
+    mockInterviews,
     createdAt: prep.createdAt.toISOString(),
   };
 }

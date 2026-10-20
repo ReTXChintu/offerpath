@@ -93,6 +93,8 @@ export const Problems = {
       'Start a new attempt to submit again.',
     ),
 
+  conflict: (detail: string) => problem('conflict', 'Conflict', HttpStatus.CONFLICT, detail),
+
   assistanceGated: (reason: string) =>
     problem('assistance-gated', 'Assistance gated', HttpStatus.CONFLICT, reason),
 

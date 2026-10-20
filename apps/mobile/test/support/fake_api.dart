@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -22,11 +23,14 @@ class FakeReply {
 
 /// A recorded request.
 class FakeRequest {
-  FakeRequest(this.method, this.path, this.body, this.headers);
+  FakeRequest(this.method, this.path, this.body, this.headers, [this.receiveTimeout]);
   final String method;
   final String path;
   final Object? body;
   final Map<String, dynamic> headers;
+
+  /// How long the client would wait for this reply.
+  final Duration? receiveTimeout;
 }
 
 /// Answers Dio requests from a table keyed `'METHOD /api/v1/path'`, records
@@ -39,6 +43,9 @@ class FakeApi implements HttpClientAdapter {
   /// Throw a connection error instead of answering.
   bool offline = false;
 
+  /// While set, replies wait for it (to see a screen mid-request).
+  Completer<void>? hold;
+
   void on(String method, String path, FakeReply reply) => routes['$method $path'] = (_) => reply;
 
   ApiClient client({String token = 'device-token', String server = 'http://test.local:50005'}) => ApiClient(server, token: token, dio: Dio()..httpClientAdapter = this);
@@ -46,8 +53,9 @@ class FakeApi implements HttpClientAdapter {
   @override
   Future<ResponseBody> fetch(RequestOptions options, Stream<Uint8List>? requestStream, Future<void>? cancelFuture) async {
     if (offline) throw DioException.connectionError(requestOptions: options, reason: 'offline');
-    final request = FakeRequest(options.method, options.uri.path, options.data, options.headers);
+    final request = FakeRequest(options.method, options.uri.path, options.data, options.headers, options.receiveTimeout);
     requests.add(request);
+    if (hold != null) await hold!.future;
     final handler = routes['${options.method} ${options.uri.path}'];
     final reply = handler == null ? FakeReply.problem(404, 'not-found', 'Not found') : handler(request);
     final text = reply.body == null ? '' : (reply.body is String ? reply.body as String : jsonEncode(reply.body));

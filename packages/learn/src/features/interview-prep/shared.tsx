@@ -2,6 +2,9 @@ import { Alert, Badge, Spinner, type AlertStatus, type BadgeVariant } from '@off
 
 import { learnPaths, LearnLink } from '../../context';
 import type {
+  MockStage,
+  MockStatus,
+  MockVerdict,
   PrepAiSource,
   PrepQuestionKind,
   PrepStatus,
@@ -12,6 +15,7 @@ export const KIND_ORDER: PrepQuestionKind[] = [
   'TECHNICAL',
   'SYSTEM_DESIGN',
   'CODING',
+  'DSA',
   'BEHAVIORAL',
   'COMPANY',
 ];
@@ -20,6 +24,7 @@ export const KIND_LABEL: Record<string, string> = {
   TECHNICAL: 'Technical',
   SYSTEM_DESIGN: 'System design',
   CODING: 'Coding',
+  DSA: 'Data structures & algorithms',
   BEHAVIORAL: 'Behavioral',
   COMPANY: 'About the company',
 };
@@ -102,4 +107,56 @@ export function scoreVariant(score: number): BadgeVariant {
 
 export function formatScore(score: number | null): string {
   return score === null ? '—' : `${Math.round(score * 10) / 10}/10`;
+}
+
+// -- Mock interviews ----------------------------------------------------------
+
+export const STAGE_LABEL: Record<MockStage, string> = {
+  INTRO: 'Intro',
+  TECHNICAL: 'Technical',
+  CODING: 'Coding',
+  WRAP_UP: 'Wrap-up',
+};
+
+export const stageLabel = (stage: string) => STAGE_LABEL[stage as MockStage] ?? stage;
+
+export const VERDICT: Record<MockVerdict, { label: string; variant: BadgeVariant }> = {
+  STRONG_HIRE: { label: 'Strong hire', variant: 'success' },
+  HIRE: { label: 'Hire', variant: 'success' },
+  LEAN_HIRE: { label: 'Lean hire', variant: 'info' },
+  LEAN_NO_HIRE: { label: 'Lean no hire', variant: 'warning' },
+  NO_HIRE: { label: 'No hire', variant: 'error' },
+};
+
+export function VerdictBadge({ verdict, size }: { verdict: MockVerdict; size?: 'sm' | 'md' }) {
+  const v = VERDICT[verdict] ?? { label: verdict, variant: 'neutral' as const };
+  return (
+    <Badge variant={v.variant} size={size} title="The interviewer's verdict">
+      {v.label}
+    </Badge>
+  );
+}
+
+const MOCK_STATUS: Record<MockStatus, { label: string; variant: BadgeVariant }> = {
+  IN_PROGRESS: { label: 'In progress', variant: 'primary' },
+  REPORTING: { label: 'Writing the report', variant: 'info' },
+  COMPLETED: { label: 'Completed', variant: 'success' },
+  FAILED: { label: 'Report failed', variant: 'error' },
+  ABANDONED: { label: 'Ended early', variant: 'neutral' },
+};
+
+export function MockStatusBadge({ status }: { status: MockStatus }) {
+  const s = MOCK_STATUS[status] ?? { label: status, variant: 'neutral' as const };
+  return (
+    <Badge variant={s.variant} size="sm">
+      {s.label}
+    </Badge>
+  );
+}
+
+/** Which AI is playing the interviewer. */
+export function interviewerByLabel(source: PrepAiSource | null): string | null {
+  if (source === 'desktop') return "Interviewer: your laptop's Claude";
+  if (source === 'openai') return 'Interviewer: your OpenAI key';
+  return null;
 }

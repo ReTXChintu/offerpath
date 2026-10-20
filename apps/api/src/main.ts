@@ -44,7 +44,8 @@ async function bootstrap(): Promise<void> {
   });
 
   // Synced documents and code submissions are text; 2 MB is generous and caps a trivial DoS.
-  app.useBodyParser('json', { limit: '2mb' });
+  // 6 MB: a CV upload is up to 4 MB of file, sent as base64.
+  app.useBodyParser('json', { limit: '6mb' });
 
   if (!config.isProduction) {
     const document = SwaggerModule.createDocument(

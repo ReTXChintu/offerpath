@@ -71,9 +71,14 @@ export { InterviewPrepList } from './features/interview-prep/PrepList';
 export {
   PrepCreate,
   validatePrepDraft,
+  type CvDraft,
   type PrepDraft,
 } from './features/interview-prep/PrepCreate';
 export { PrepDetail } from './features/interview-prep/PrepDetail';
+export {
+  MockInterviewPage,
+  INTERVIEWER_UNAVAILABLE,
+} from './features/interview-prep/MockInterview';
 export { UpcomingPreps } from './features/interview-prep/UpcomingPreps';
 export { AI_SOURCE_MESSAGE } from './features/interview-prep/shared';
 export { TodayPage } from './features/today/TodayPage';

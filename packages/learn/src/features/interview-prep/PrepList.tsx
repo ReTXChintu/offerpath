@@ -6,7 +6,7 @@ import { learnPaths, LearnLink, useLearnNavigate } from '../../context';
 import { useInterviewPreps, type PrepView } from '../../lib/interview-prep';
 import { countdown, formatWhen, isPast } from '../../lib/when';
 
-import { formatScore, PrepStatusBadge, prepTitle, scoreVariant } from './shared';
+import { formatScore, PrepStatusBadge, prepTitle, scoreVariant, VerdictBadge } from './shared';
 
 /**
  * Interview prep: every interview being prepared for, soonest first, with
@@ -90,6 +90,7 @@ export function InterviewPrepList() {
 function PrepCard({ prep, now }: { prep: PrepView; now: number }) {
   const { answered, total, averageScore } = prep.progress;
   const passed = isPast(prep.scheduledAt, now);
+  const lastMock = prep.mockInterviews?.[0];
   return (
     <LearnLink to={learnPaths.interviewPrep(prep.id)} className="card card-hover prep-card">
       <div className="row items-start justify-between g3">
@@ -112,6 +113,18 @@ function PrepCard({ prep, now }: { prep: PrepView; now: number }) {
           </span>
         ))}
       </div>
+
+      {lastMock ? (
+        <div className="t-caption row items-center g2 wrap mt3">
+          <Icon name="mic" size={12} />
+          {lastMock.status === 'IN_PROGRESS'
+            ? 'Mock interview in progress'
+            : lastMock.overallScore !== null
+              ? `Last mock interview: ${formatScore(lastMock.overallScore)}`
+              : 'Mock interview done'}
+          {lastMock.verdict ? <VerdictBadge verdict={lastMock.verdict} size="sm" /> : null}
+        </div>
+      ) : null}
 
       {prep.status === 'READY' && total > 0 ? (
         <div className="mt4">

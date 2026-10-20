@@ -3,14 +3,28 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
 import { problem, renderLearn, type RequestMock } from '../../__tests__/harness';
-import type { PrepQuestionView, PrepView } from '../../lib/interview-prep';
+import type {
+  MockInterviewView,
+  MockReport,
+  MockTurnView,
+  PrepQuestionView,
+  PrepView,
+} from '../../lib/interview-prep';
 import { countdown, localDateTimeToIso } from '../../lib/when';
 import { UpcomingPreps } from './UpcomingPreps';
 import { PrepCreate, validatePrepDraft, type PrepDraft } from './PrepCreate';
+import { INTERVIEWER_UNAVAILABLE, MockInterviewPage } from './MockInterview';
 import { PrepDetail } from './PrepDetail';
 import { InterviewPrepList } from './PrepList';
 import { GRADING_UNAVAILABLE } from './PrepQuestion';
 import { AI_SOURCE_MESSAGE } from './shared';
+
+// Monaco needs a real browser; a textarea stands in for it.
+vi.mock('@monaco-editor/react', () => ({
+  default: ({ value, onChange }: { value: string; onChange: (v: string) => void }) => (
+    <textarea aria-label="Code editor" value={value} onChange={(e) => onChange(e.target.value)} />
+  ),
+}));
 
 type Route = (path: string, options?: { method?: string; body?: unknown }) => unknown;
 
@@ -75,6 +89,9 @@ function prep(over: Partial<PrepView> = {}): PrepView {
       }),
     ],
     progress: { answered: 0, total: 2, averageScore: null },
+    includeDsa: false,
+    resume: null,
+    mockInterviews: [],
     createdAt: new Date().toISOString(),
     ...over,
   };
@@ -87,6 +104,8 @@ const FILLED: PrepDraft = {
   technologies: ['React'],
   date: '2099-11-03',
   time: '10:30',
+  includeDsa: false,
+  cv: { mode: 'none', text: '', fileName: null },
 };
 
 describe('validatePrepDraft', () => {
@@ -427,5 +446,606 @@ describe('Today', () => {
       'href',
       '#/interview-prep',
     );
+  });
+});
+
+describe('the CV and DSA on the create form', () => {
+  it('sends DSA and a pasted CV with the prep', async () => {
+    const user = userEvent.setup();
+    const request = router((path, options) => {
+      if (path === '/interview-preps/ai') return { source: 'desktop' };
+      if (path === '/interview-preps/cv/profile') return { text: null };
+      if (path === '/interview-preps' && options?.method === 'POST') {
+        return prep({ id: 'new2', status: 'GENERATING', plan: null, questions: [] });
+      }
+      return {};
+    });
+    const { navigator } = renderLearn(<PrepCreate />, { request });
+
+    await user.type(screen.getByLabelText('Technologies'), 'Node.js{enter}');
+    await user.click(screen.getByLabelText('Include DSA questions'));
+    await user.click(screen.getByRole('radio', { name: /Paste text/ }));
+    await user.type(screen.getByLabelText('CV text'), 'Five years of Node.js at Initech.');
+    fireEvent.change(screen.getByLabelText(/^Interview date/), { target: { value: '2099-11-03' } });
+    fireEvent.change(screen.getByLabelText(/^Time/), { target: { value: '09:15' } });
+    await user.click(screen.getByRole('button', { name: 'Prepare' }));
+
+    await waitFor(() =>
+      expect(navigator.navigate).toHaveBeenCalledWith('/interview-prep/new2', { replace: true }),
+    );
+    const post = request.mock.calls.find(([p, o]) => p === '/interview-preps' && o?.method);
+    expect(post?.[1]?.body).toMatchObject({
+      technologies: ['Node.js'],
+      includeDsa: true,
+      resume: { text: 'Five years of Node.js at Initech.', source: 'pasted' },
+    });
+  });
+
+  it('sends no CV by default, and offers the profile only when there is one', async () => {
+    const user = userEvent.setup();
+    const request = router((path, options) => {
+      if (path === '/interview-preps/ai') return { source: 'desktop' };
+      if (path === '/interview-preps/cv/profile') return { text: null };
+      if (options?.method === 'POST') return prep({ id: 'new3' });
+      return {};
+    });
+    renderLearn(<PrepCreate />, { request });
+
+    const profile = await screen.findByRole('radio', { name: /Use my Offerpath profile/ });
+    await waitFor(() => expect(profile).toBeDisabled());
+    expect(screen.getByText(/Your Offerpath profile is empty/)).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /No CV/ })).toBeChecked();
+
+    await user.type(screen.getByLabelText('Technologies'), 'Go{enter}');
+    fireEvent.change(screen.getByLabelText(/^Interview date/), { target: { value: '2099-11-03' } });
+    fireEvent.change(screen.getByLabelText(/^Time/), { target: { value: '09:15' } });
+    await user.click(screen.getByRole('button', { name: 'Prepare' }));
+    await waitFor(() =>
+      expect(request.mock.calls.some(([, o]) => o?.method === 'POST')).toBe(true),
+    );
+    const post = request.mock.calls.find(([, o]) => o?.method === 'POST');
+    expect(post?.[1]?.body).toMatchObject({ includeDsa: false, resume: null });
+  });
+
+  it('uses the profile CV when there is one', async () => {
+    const user = userEvent.setup();
+    const request = router((path) =>
+      path === '/interview-preps/cv/profile'
+        ? { text: 'Jane Doe. Backend engineer.' }
+        : { source: 'desktop' },
+    );
+    renderLearn(<PrepCreate />, { request });
+
+    const profile = await screen.findByRole('radio', { name: /Use my Offerpath profile/ });
+    await waitFor(() => expect(profile).toBeEnabled());
+    await user.click(profile);
+    expect(screen.getByLabelText('CV text')).toHaveValue('Jane Doe. Backend engineer.');
+  });
+
+  it('reads an uploaded CV file and shows its text to check', async () => {
+    const user = userEvent.setup();
+    const request = router((path) => {
+      if (path === '/interview-preps/cv/extract') {
+        return { text: 'Extracted: Jane Doe', fileName: 'cv.txt', chars: 19 };
+      }
+      if (path === '/interview-preps/cv/profile') return { text: null };
+      return { source: 'desktop' };
+    });
+    renderLearn(<PrepCreate />, { request });
+
+    await user.click(screen.getByRole('radio', { name: /Upload a file/ }));
+    await user.upload(
+      screen.getByLabelText('CV file'),
+      new File(['hello'], 'cv.txt', { type: 'text/plain' }),
+    );
+
+    expect(await screen.findByLabelText('CV text')).toHaveValue('Extracted: Jane Doe');
+    expect(request).toHaveBeenCalledWith('/interview-preps/cv/extract', {
+      method: 'POST',
+      body: { fileName: 'cv.txt', contentBase64: btoa('hello') },
+    });
+    expect(screen.getByText('cv.txt')).toBeInTheDocument();
+  });
+
+  it('refuses a file that is not a CV format', async () => {
+    const user = userEvent.setup({ applyAccept: false });
+    const request = router(() => ({ source: 'desktop' }));
+    renderLearn(<PrepCreate />, { request });
+
+    await user.click(screen.getByRole('radio', { name: /Upload a file/ }));
+    await user.upload(screen.getByLabelText('CV file'), new File(['x'], 'cv.png'));
+    expect(await screen.findByText(/That file type is not supported/)).toBeInTheDocument();
+    expect(request.mock.calls.some(([p]) => p === '/interview-preps/cv/extract')).toBe(false);
+  });
+});
+
+describe('editing a prep', () => {
+  it('asks before a change that rewrites the plan, then sends it', async () => {
+    const user = userEvent.setup();
+    const request = router((path, options) => {
+      if (options?.method === 'PATCH') return prep({ status: 'GENERATING', plan: null });
+      if (path === '/interview-preps/cv/profile') return { text: null };
+      if (path === '/interview-preps/ai') return { source: 'desktop' };
+      return prep({
+        includeDsa: false,
+        resume: { source: 'pasted', fileName: null, chars: 9, text: 'My old CV' },
+      });
+    });
+    renderLearn(<PrepDetail prepId="p1" />, { request });
+
+    await user.click(await screen.findByRole('button', { name: 'Edit' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Edit the interview' });
+    // Prefilled with what the prep has.
+    expect(within(dialog).getByLabelText('Company')).toHaveValue('Acme');
+    expect(within(dialog).getByLabelText('CV text')).toHaveValue('My old CV');
+    await user.click(within(dialog).getByLabelText('Include DSA questions'));
+    await user.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+    const confirm = await screen.findByRole('dialog', { name: 'Rewrite the plan and questions?' });
+    expect(
+      within(confirm).getByText(/practice answers on the current questions are lost/),
+    ).toBeVisible();
+    expect(request.mock.calls.some(([, o]) => o?.method === 'PATCH')).toBe(false);
+    await user.click(within(confirm).getByRole('button', { name: 'Save and rewrite' }));
+
+    await waitFor(() =>
+      expect(request.mock.calls.some(([, o]) => o?.method === 'PATCH')).toBe(true),
+    );
+    const body = request.mock.calls.find(([, o]) => o?.method === 'PATCH')?.[1]?.body as Record<
+      string,
+      unknown
+    >;
+    expect(body).toMatchObject({ company: 'Acme', includeDsa: true });
+    // Unchanged fields that would rewrite the plan are left out.
+    expect(body).not.toHaveProperty('jobDescription');
+    expect(body).not.toHaveProperty('resume');
+  });
+});
+
+// -- Mock interviews -------------------------------------------------------------
+
+function turn(over: Partial<MockTurnView> = {}): MockTurnView {
+  return {
+    id: 't0',
+    order: 0,
+    speaker: 'INTERVIEWER',
+    stage: 'INTRO',
+    kind: 'OPENING',
+    text: 'Tell me about yourself.',
+    code: null,
+    codeLanguage: null,
+    problem: null,
+    language: null,
+    assessment: null,
+    createdAt: new Date().toISOString(),
+    ...over,
+  };
+}
+
+function mock(over: Partial<MockInterviewView> = {}): MockInterviewView {
+  return {
+    id: 'm1',
+    prepId: 'p1',
+    status: 'IN_PROGRESS',
+    stage: 'INTRO',
+    stages: ['INTRO', 'TECHNICAL', 'CODING', 'WRAP_UP'],
+    awaitingReply: false,
+    replying: false,
+    aiSource: 'desktop',
+    turns: [turn()],
+    answered: 0,
+    report: null,
+    overallScore: null,
+    error: null,
+    startedAt: new Date().toISOString(),
+    endedAt: null,
+    ...over,
+  };
+}
+
+const ANSWER = turn({
+  id: 't1',
+  order: 1,
+  speaker: 'CANDIDATE',
+  kind: 'ANSWER',
+  text: 'I has worked on payment APIs for four years.',
+});
+
+const FOLLOW_UP = turn({
+  id: 't2',
+  order: 2,
+  kind: 'FOLLOW_UP',
+  text: 'Which of those APIs are you proudest of?',
+});
+
+/** Routes the prep, the AI source and the interview; `extra` answers the rest. */
+function mockRouter(get: () => MockInterviewView, extra: Route = () => undefined) {
+  return router((path, options) => {
+    const out = extra(path, options);
+    if (out !== undefined) return out;
+    if (path === '/interview-preps/ai') return { source: 'desktop' };
+    if (path === '/interview-preps/p1') return prep();
+    if (path === '/mock-interviews/m1') return get();
+    return {};
+  });
+}
+
+describe('a mock interview', () => {
+  it('shows the conversation: turns, language corrections and the coding problem', async () => {
+    const view = mock({
+      stage: 'CODING',
+      answered: 2,
+      turns: [
+        turn(),
+        {
+          ...ANSWER,
+          language: {
+            ok: false,
+            corrections: [
+              {
+                original: 'I has worked',
+                corrected: 'I have worked',
+                note: 'Use "have" with "I".',
+              },
+            ],
+          },
+        },
+        { ...FOLLOW_UP, stage: 'TECHNICAL' },
+        turn({
+          id: 't3',
+          order: 3,
+          speaker: 'CANDIDATE',
+          kind: 'ANSWER',
+          stage: 'TECHNICAL',
+          text: 'The refunds service.',
+          language: { ok: true, corrections: [] },
+        }),
+        turn({
+          id: 't4',
+          order: 4,
+          kind: 'CODING',
+          stage: 'CODING',
+          text: "Let's write some code.",
+          problem: {
+            title: 'Two sum',
+            statement: 'Return the indices of the two numbers that add up to the target.',
+            examples: [{ input: '[2,7,11,15], 9', output: '[0,1]', explanation: '2 + 7 = 9' }],
+            constraints: ['2 <= n <= 10^4'],
+          },
+        }),
+      ],
+    });
+    renderLearn(<MockInterviewPage interviewId="m1" />, { request: mockRouter(() => view) });
+
+    expect(await screen.findByText('Tell me about yourself.')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Acme · Backend engineer' })).toBeVisible();
+    expect(screen.getByText("Interviewer: your laptop's Claude")).toBeInTheDocument();
+
+    const fixes = screen.getByRole('list', { name: 'Language corrections' });
+    expect(within(fixes).getByText('I has worked')).toBeInTheDocument();
+    expect(within(fixes).getByText('I have worked')).toBeInTheDocument();
+    expect(within(fixes).getByText('Use "have" with "I".')).toBeInTheDocument();
+    expect(screen.getByText('Language looks good')).toBeInTheDocument();
+
+    const problemCard = screen.getByRole('region', { name: 'Coding problem: Two sum' });
+    expect(within(problemCard).getByText(/indices of the two numbers/)).toBeInTheDocument();
+    expect(within(problemCard).getByText('[0,1]')).toBeInTheDocument();
+    expect(within(problemCard).getByText('2 <= n <= 10^4')).toBeInTheDocument();
+
+    const stages = screen.getByRole('list', { name: 'Interview stages' });
+    expect(within(stages).getByText('Coding').closest('li')).toHaveAttribute(
+      'aria-current',
+      'step',
+    );
+    // A coding question opens the editor, in a language from the prep's technologies.
+    expect(screen.getByLabelText('Code editor')).toBeInTheDocument();
+    expect(screen.getByLabelText('Code language')).toHaveValue('javascript');
+  });
+
+  it('sends an answer and shows the reply', async () => {
+    const user = userEvent.setup();
+    let answered = false;
+    const after = mock({ turns: [turn(), ANSWER, FOLLOW_UP], answered: 1 });
+    const request = mockRouter(
+      () => (answered ? after : mock()),
+      (path) => {
+        if (path === '/mock-interviews/m1/answer') {
+          answered = true;
+          return after;
+        }
+        return undefined;
+      },
+    );
+    renderLearn(<MockInterviewPage interviewId="m1" />, { request });
+
+    const box = await screen.findByLabelText('Your answer');
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+    await user.type(box, 'I has worked on payment APIs for four years.');
+    await user.keyboard('{Control>}{Enter}{/Control}');
+
+    expect(await screen.findByText('Which of those APIs are you proudest of?')).toBeInTheDocument();
+    expect(request).toHaveBeenCalledWith('/mock-interviews/m1/answer', {
+      method: 'POST',
+      body: {
+        text: 'I has worked on payment APIs for four years.',
+        code: null,
+        codeLanguage: null,
+      },
+    });
+    expect(screen.getByLabelText('Your answer')).toHaveValue('');
+  });
+
+  it('sends code with a coding answer', async () => {
+    const user = userEvent.setup();
+    const coding = mock({
+      stage: 'CODING',
+      turns: [
+        turn({
+          id: 't4',
+          order: 4,
+          kind: 'CODING',
+          stage: 'CODING',
+          text: 'Over to you.',
+          problem: { title: 'Two sum', statement: 'Find them.', examples: [], constraints: [] },
+        }),
+      ],
+    });
+    const request = mockRouter(
+      () => coding,
+      (path) => (path === '/mock-interviews/m1/answer' ? coding : undefined),
+    );
+    renderLearn(<MockInterviewPage interviewId="m1" />, { request });
+
+    await user.selectOptions(await screen.findByLabelText('Code language'), 'python');
+    fireEvent.change(screen.getByLabelText('Code editor'), {
+      target: { value: 'def two_sum(nums, target):\n    pass' },
+    });
+    await user.type(screen.getByLabelText('Your answer'), 'A hash map, one pass.');
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith('/mock-interviews/m1/answer', {
+        method: 'POST',
+        body: {
+          text: 'A hash map, one pass.',
+          code: 'def two_sum(nums, target):\n    pass',
+          codeLanguage: 'python',
+        },
+      }),
+    );
+  });
+
+  it('keeps the answer when no AI can reply, and retries the reply', async () => {
+    const user = userEvent.setup();
+    let stage: 'start' | 'saved' | 'replied' = 'start';
+    const saved = mock({ turns: [turn(), ANSWER], answered: 1, awaitingReply: true });
+    const replied = mock({ turns: [turn(), ANSWER, FOLLOW_UP], answered: 1 });
+    const request = mockRouter(
+      () => (stage === 'start' ? mock() : stage === 'saved' ? saved : replied),
+      (path) => {
+        if (path === '/mock-interviews/m1/answer') {
+          stage = 'saved';
+          return problem(
+            'ai-unavailable',
+            503,
+            'AI runs on your desktop. Open Offerpath on your computer.',
+          );
+        }
+        if (path === '/mock-interviews/m1/reply') {
+          stage = 'replied';
+          return replied;
+        }
+        return undefined;
+      },
+    );
+    renderLearn(<MockInterviewPage interviewId="m1" />, { request });
+
+    await user.type(
+      await screen.findByLabelText('Your answer'),
+      'I has worked on payment APIs for four years.',
+    );
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+
+    expect(await screen.findByText('The interviewer did not reply')).toBeInTheDocument();
+    expect(screen.getByText(INTERVIEWER_UNAVAILABLE)).toBeInTheDocument();
+    // The answer was saved: it is in the transcript, and the box waits for the reply.
+    expect(screen.getByText('I has worked on payment APIs for four years.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Your answer')).toBeDisabled();
+
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByText('Which of those APIs are you proudest of?')).toBeInTheDocument();
+    expect(request).toHaveBeenCalledWith('/mock-interviews/m1/reply', { method: 'POST' });
+    expect(screen.queryByText('The interviewer did not reply')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Your answer')).toBeEnabled();
+  });
+
+  it('ends the interview after asking, then waits for the report', async () => {
+    const user = userEvent.setup();
+    const request = mockRouter(
+      () => mock(),
+      (path) =>
+        path === '/mock-interviews/m1/finish'
+          ? mock({ status: 'REPORTING', endedAt: new Date().toISOString() })
+          : undefined,
+    );
+    renderLearn(<MockInterviewPage interviewId="m1" />, { request });
+
+    await user.click(await screen.findByRole('button', { name: 'End interview' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: 'End interview' }));
+    expect(await screen.findByText('Writing your report…')).toBeInTheDocument();
+    expect(request).toHaveBeenCalledWith('/mock-interviews/m1/finish', { method: 'POST' });
+    expect(screen.queryByLabelText('Your answer')).not.toBeInTheDocument();
+  });
+
+  it('shows why the report failed and writes it again', async () => {
+    const user = userEvent.setup();
+    const request = mockRouter(
+      () => mock({ status: 'FAILED', error: 'The report timed out.' }),
+      (path) => (path === '/mock-interviews/m1/report' ? mock({ status: 'REPORTING' }) : undefined),
+    );
+    renderLearn(<MockInterviewPage interviewId="m1" />, { request });
+
+    expect(await screen.findByText('The report timed out.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByText('Writing your report…')).toBeInTheDocument();
+  });
+
+  it('shows the report: score, verdict, dimensions and each question with a stronger answer', async () => {
+    const user = userEvent.setup();
+    const report: MockReport = {
+      overallScore: 6.5,
+      verdict: 'LEAN_HIRE',
+      summary: 'Solid basics; go deeper on databases.',
+      dimensions: [
+        { name: 'COMMUNICATION', score: 7, comment: 'Clear and calm.' },
+        { name: 'TECHNICAL_DEPTH', score: 5, comment: 'Stayed on the surface.' },
+      ],
+      questions: [
+        {
+          turnOrder: 0,
+          question: 'Introduce yourself',
+          answerSummary: 'Four years on payment APIs.',
+          score: 5,
+          wentWell: 'Named your stack.',
+          couldBeBetter: 'Give one concrete project.',
+          strongerAnswer: 'I have spent four years building payment APIs at Initech.',
+        },
+      ],
+      language: { score: 8, patterns: ['Subject-verb agreement'], note: 'Mostly fluent.' },
+      strengths: ['Clear structure'],
+      improvements: ['Depth on databases'],
+      nextSteps: ['Practise indexing questions'],
+    };
+    const done = mock({
+      status: 'COMPLETED',
+      stage: 'WRAP_UP',
+      answered: 1,
+      overallScore: 6.5,
+      endedAt: new Date().toISOString(),
+      turns: [
+        turn(),
+        {
+          ...ANSWER,
+          assessment: { verdict: 'PARTIAL', note: 'Too general.' },
+          language: { ok: true, corrections: [] },
+        },
+      ],
+      report,
+    });
+    const request = mockRouter(
+      () => done,
+      (path, options) =>
+        path === '/interview-preps/p1/mock-interviews' && options?.method === 'POST'
+          ? mock({ id: 'm2' })
+          : undefined,
+    );
+    const { navigator } = renderLearn(<MockInterviewPage interviewId="m1" />, { request });
+
+    expect(await screen.findByLabelText('Overall score 6.5/10')).toBeInTheDocument();
+    expect(screen.getByText('Lean hire')).toBeInTheDocument();
+    expect(screen.getByText('Solid basics; go deeper on databases.')).toBeInTheDocument();
+    const dims = screen.getByRole('list', { name: 'Scores by dimension' });
+    expect(within(dims).getByText('Communication')).toBeInTheDocument();
+    expect(within(dims).getByText('Stayed on the surface.')).toBeInTheDocument();
+    expect(screen.getByText('Depth on databases')).toBeInTheDocument();
+    expect(screen.getByText('Practise indexing questions')).toBeInTheDocument();
+    expect(screen.getByText('Subject-verb agreement')).toBeInTheDocument();
+
+    const q1 = screen.getByRole('group', { name: 'Question 1' });
+    expect(within(q1).getByText('Tell me about yourself.')).toBeInTheDocument();
+    expect(
+      within(q1).getByText('I has worked on payment APIs for four years.'),
+    ).toBeInTheDocument();
+    expect(within(q1).getByText('Partly right')).toBeInTheDocument();
+    expect(within(q1).getByText('Too general.')).toBeInTheDocument();
+    expect(within(q1).getByText('Score 5/10')).toBeInTheDocument();
+    expect(within(q1).getByText('Named your stack.')).toBeInTheDocument();
+    expect(within(q1).getByText('Give one concrete project.')).toBeInTheDocument();
+    expect(within(q1).getByText('A stronger answer')).toBeInTheDocument();
+    expect(
+      within(q1).getByText('I have spent four years building payment APIs at Initech.'),
+    ).toBeInTheDocument();
+
+    // The full transcript is a tab away.
+    await user.click(screen.getByRole('tab', { name: 'Transcript' }));
+    expect(screen.getByRole('list', { name: 'Transcript' })).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Question 1' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Start a new mock interview' }));
+    await waitFor(() =>
+      expect(navigator.navigate).toHaveBeenCalledWith('/mock-interview/m2', undefined),
+    );
+    expect(request).toHaveBeenCalledWith('/interview-preps/p1/mock-interviews', {
+      method: 'POST',
+      body: { restart: true },
+    });
+  });
+});
+
+describe('mock interviews on a prep', () => {
+  it('starts one and opens it', async () => {
+    const user = userEvent.setup();
+    const request = router((path, options) =>
+      path === '/interview-preps/p1/mock-interviews' && options?.method === 'POST'
+        ? mock({ id: 'm9' })
+        : prep(),
+    );
+    const { navigator } = renderLearn(<PrepDetail prepId="p1" />, { request });
+
+    await user.click(await screen.findByRole('button', { name: 'Start mock interview' }));
+    await waitFor(() =>
+      expect(navigator.navigate).toHaveBeenCalledWith('/mock-interview/m9', undefined),
+    );
+    expect(request).toHaveBeenCalledWith('/interview-preps/p1/mock-interviews', {
+      method: 'POST',
+      body: {},
+    });
+  });
+
+  it('continues the one in progress and lists past ones with their scores', async () => {
+    const user = userEvent.setup();
+    const at = new Date().toISOString();
+    const request = router(() =>
+      prep({
+        mockInterviews: [
+          {
+            id: 'm3',
+            status: 'IN_PROGRESS',
+            stage: 'TECHNICAL',
+            overallScore: null,
+            verdict: null,
+            answered: 3,
+            startedAt: at,
+            endedAt: null,
+          },
+          {
+            id: 'm2',
+            status: 'COMPLETED',
+            stage: 'WRAP_UP',
+            overallScore: 7.5,
+            verdict: 'HIRE',
+            answered: 12,
+            startedAt: at,
+            endedAt: at,
+          },
+        ],
+      }),
+    );
+    const { navigator } = renderLearn(<PrepDetail prepId="p1" />, { request });
+
+    const list = await screen.findByRole('list', { name: 'Past mock interviews' });
+    const links = within(list).getAllByRole('link');
+    expect(links.map((l) => l.getAttribute('href'))).toEqual([
+      '#/mock-interview/m3',
+      '#/mock-interview/m2',
+    ]);
+    expect(within(links[1]!).getByText('7.5/10')).toBeInTheDocument();
+    expect(within(links[1]!).getByText('Hire')).toBeInTheDocument();
+    expect(within(links[0]!).getByText('In progress')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Continue mock interview' }));
+    expect(navigator.navigate).toHaveBeenCalledWith('/mock-interview/m3', undefined);
+    expect(request.mock.calls.some(([, o]) => o?.method === 'POST')).toBe(false);
   });
 });

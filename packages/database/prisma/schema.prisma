@@ -43,6 +43,7 @@ model User {
   dailyPlans        DailyPlan[]
   aiFallbackKey     AiFallbackKey?
   interviewPreps    InterviewPrep[]
+  mockInterviews    MockInterview[]
   conceptChats      ConceptChatMessage[]
   questionAnswers   ConceptQuestionAnswer[]
   assignments       PracticeAssignment[]
@@ -1502,6 +1503,7 @@ enum PrepQuestionKind {
   CODING
   BEHAVIORAL
   COMPANY
+  DSA
 }
 
 /// One real interview the user is preparing for: a job description and/or
@@ -1514,6 +1516,14 @@ model InterviewPrep {
   role           String?
   jobDescription String?
   technologies   String[]            @default([])
+  /// Data structures and algorithms: DSA questions in the prep, DSA problems
+  /// in its mock interviews.
+  includeDsa     Boolean             @default(false)
+  /// The CV the user is interviewing with, as text.
+  resumeText     String?
+  /// "upload", "profile" (written from the synced profile) or "pasted".
+  resumeSource   String?
+  resumeFileName String?
   scheduledAt    DateTime
   status         InterviewPrepStatus @default(GENERATING)
   error          String?
@@ -1524,10 +1534,79 @@ model InterviewPrep {
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
 
-  questions InterviewPrepQuestion[]
+  questions      InterviewPrepQuestion[]
+  mockInterviews MockInterview[]
 
   @@index([userId, scheduledAt])
   @@map("interview_preps")
+}
+
+enum MockInterviewStatus {
+  IN_PROGRESS
+  REPORTING
+  COMPLETED
+  FAILED
+  ABANDONED
+}
+
+enum MockInterviewStage {
+  INTRO
+  TECHNICAL
+  CODING
+  WRAP_UP
+}
+
+/// A live mock interview for one prep: an AI interviewer asks, the user
+/// answers, turn by turn; a report at the end. See docs/mock-interview.md.
+model MockInterview {
+  id           String              @id @default(cuid())
+  userId       String
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  prepId       String
+  prep         InterviewPrep       @relation(fields: [prepId], references: [id], onDelete: Cascade)
+  status       MockInterviewStatus @default(IN_PROGRESS)
+  stage        MockInterviewStage  @default(INTRO)
+  /// "desktop" or "openai": where the latest AI call ran.
+  aiSource     String?
+  /// The report agent's output.
+  report       Json?
+  overallScore Float?
+  /// Why the last reply or the report failed.
+  error        String?
+  startedAt    DateTime            @default(now())
+  endedAt      DateTime?
+  updatedAt    DateTime            @updatedAt
+
+  turns MockInterviewTurn[]
+
+  @@index([prepId, startedAt])
+  @@index([userId, status])
+  @@map("mock_interviews")
+}
+
+model MockInterviewTurn {
+  id           String             @id @default(cuid())
+  interviewId  String
+  interview    MockInterview      @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  order        Int
+  /// "INTERVIEWER" or "CANDIDATE".
+  speaker      String
+  stage        MockInterviewStage
+  /// OPENING, FOLLOW_UP, CROSS_QUESTION, NEW_QUESTION, CODING, CLOSING; ANSWER for the candidate.
+  kind         String
+  text         String
+  code         String?
+  codeLanguage String?
+  /// Interviewer CODING turns: { title, statement, examples[], constraints[] }.
+  problem      Json?
+  /// Candidate turns: { ok, corrections[] }, the grammar feedback.
+  language     Json?
+  /// Candidate turns: { verdict, note }, shown once the interview is over.
+  assessment   Json?
+  createdAt    DateTime           @default(now())
+
+  @@unique([interviewId, order])
+  @@map("mock_interview_turns")
 }
 
 model InterviewPrepQuestion {

@@ -4,11 +4,15 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/interview_prep.dart';
+import '../models/mock_interview.dart';
 import '../services/api_client.dart';
 import '../state/auth_controller.dart';
 import '../state/interview_prep_controller.dart';
 import '../util/format.dart';
 import '../widgets/common.dart';
+import 'mock_interview_page.dart';
+import 'prep_create_page.dart';
+import 'prep_cv_field.dart';
 import 'prep_practice_page.dart';
 import 'prep_widgets.dart';
 import 'ui.dart';
@@ -29,7 +33,7 @@ Future<void> openPrep(BuildContext context, String prepId) async {
 /// practised on its own screen. The date and time can be changed, and the
 /// prep deleted.
 class PrepDetailPage extends StatefulWidget {
-  const PrepDetailPage({required this.api, required this.prepId, this.preps, this.voice, this.pollEvery = const Duration(seconds: 5), super.key});
+  const PrepDetailPage({required this.api, required this.prepId, this.preps, this.voice, this.pollEvery = const Duration(seconds: 5), this.cvPicker = pickCvFile, super.key});
 
   final ApiClient api;
   final String prepId;
@@ -39,6 +43,9 @@ class PrepDetailPage extends StatefulWidget {
   final InterviewPrepController? preps;
   final VoiceInput? voice;
   final Duration pollEvery;
+
+  /// The CV file picker the edit form uses (a fake in tests).
+  final CvFilePicker cvPicker;
 
   @override
   State<PrepDetailPage> createState() => _PrepDetailPageState();
@@ -111,29 +118,44 @@ class _PrepDetailPageState extends State<PrepDetailPage> {
     }
   }
 
+  /// The whole form: company, role, time, and (rewriting the plan) the job
+  /// description, technologies, DSA and the CV.
   Future<void> _edit() async {
     final prep = _prep;
     if (prep == null) return;
-    final edit = await showModalBottomSheet<_PrepEdit>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (_) => _EditSheet(prep: prep),
-    );
-    if (edit == null || !mounted) return;
+    final saved = await openPrepEdit(context, widget.api, prep, preps: widget.preps, cvPicker: widget.cvPicker);
+    if (saved == null || !mounted) return;
+    _show(saved);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(saved.isGenerating ? 'Saved. Writing the new plan and questions…' : 'Saved.')));
+  }
+
+  /// Starts (or continues) the prep's mock interview.
+  Future<void> _startMock() async {
+    final prep = _prep;
+    if (prep == null || _busy) return;
     setState(() => _busy = true);
+    MockInterview? interview;
     try {
-      _show(await widget.api.updatePrep(prep.id, company: edit.company, role: edit.role, scheduledAt: edit.scheduledAt));
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Saved.')));
+      interview = await widget.api.startMockInterview(prep.id);
     } catch (error) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(prepErrorMessage(error))));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+    if (interview == null || !mounted) return;
+    await _openMock(interview.id, initial: interview);
+  }
+
+  Future<void> _openMock(String id, {MockInterview? initial}) async {
+    await Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => MockInterviewPage(api: widget.api, interviewId: id, initial: initial, title: _prep?.title, preps: widget.preps, voice: widget.voice),
+    ));
+    // Its status and score changed while it was open.
+    if (mounted) await _load();
   }
 
   Future<void> _delete() async {
-    final ok = await confirmDialog(context, title: 'Delete this prep?', message: 'The plan, the questions and your practice answers go with it.', confirm: 'Delete');
+    final ok = await confirmDialog(context, title: 'Delete this prep?', message: 'The plan, the questions, your practice answers and mock interviews go with it.', confirm: 'Delete');
     if (!ok || !mounted) return;
     setState(() => _busy = true);
     try {
@@ -171,7 +193,7 @@ class _PrepDetailPageState extends State<PrepDetailPage> {
         title: const Text('Interview prep'),
         actions: [
           if (prep != null) ...[
-            IconButton(onPressed: _busy ? null : _edit, icon: const Icon(Icons.edit_calendar_outlined), tooltip: 'Edit date and time'),
+            IconButton(onPressed: _busy ? null : _edit, icon: const Icon(Icons.edit_outlined), tooltip: 'Edit'),
             IconButton(onPressed: _busy ? null : _delete, icon: const Icon(Icons.delete_outline), tooltip: 'Delete'),
           ],
         ],
@@ -198,6 +220,12 @@ class _PrepDetailPageState extends State<PrepDetailPage> {
                   _Header(prep: prep),
                   if (prep.isGenerating) _generating(context),
                   if (prep.isFailed) _failed(context, prep),
+                  if (prep.isReady) _mockCard(context, prep),
+                  if (prep.mockInterviews.isNotEmpty) ...[
+                    const SizedBox(height: 22),
+                    SectionLabel('Mock interviews · ${prep.mockInterviews.length}'),
+                    for (final m in prep.mockInterviews) _MockInterviewTile(summary: m, onTap: () => _openMock(m.id)),
+                  ],
                   if (prep.isReady) ..._ready(context, prep),
                 ],
               ),
@@ -229,6 +257,48 @@ class _PrepDetailPageState extends State<PrepDetailPage> {
           label: const Text('Try again'),
         ),
       ),
+    );
+  }
+
+  /// "Start mock interview" (or "Continue" when one is in progress).
+  Widget _mockCard(BuildContext context, Prep prep) {
+    final tone = LearnTone.of(context);
+    final active = prep.activeMockInterview;
+    final coding = prep.includeDsa ? 'DSA problems' : 'a coding task';
+    return Container(
+      margin: const EdgeInsets.only(top: 14),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: tone.accent.withValues(alpha: 0.07),
+        border: Border.all(color: tone.accent.withValues(alpha: 0.35)),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Row(children: [
+          IconBubble(Icons.record_voice_over_outlined, color: tone.accent, size: 36),
+          const SizedBox(width: 12),
+          Expanded(child: Text('Mock interview', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: tone.strong))),
+        ]),
+        const SizedBox(height: 8),
+        Text(
+          active != null
+              ? 'You have an interview in progress (${active.answered} answered, now in ${mockStageLabel(active.stage).toLowerCase()}). Pick up where you left off.'
+              : 'A live interview with an AI interviewer: introduce yourself, technical questions, $coding, and a wrap-up. '
+                  'Answer typed or spoken; your grammar is checked as you go, and you get a full report at the end.',
+          style: TextStyle(fontSize: 13, color: tone.body, height: 1.5),
+        ),
+        if (prep.resume == null) ...[
+          const SizedBox(height: 6),
+          Text('Tip: add your CV (Edit) so the interviewer can ask about your own experience.', style: TextStyle(fontSize: 12, color: tone.muted, height: 1.4)),
+        ],
+        const SizedBox(height: 12),
+        FilledButton.icon(
+          onPressed: _busy ? null : _startMock,
+          style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14)),
+          icon: _busy ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : Icon(active != null ? Icons.play_circle_outline : Icons.play_arrow),
+          label: Text(active != null ? 'Continue mock interview' : 'Start mock interview'),
+        ),
+      ]),
     );
   }
 
@@ -313,6 +383,13 @@ class _Header extends StatelessWidget {
         const SizedBox(height: 10),
         Wrap(spacing: 6, runSpacing: 6, children: [for (final t in prep.technologies) Tag(t, color: tone.muted)]),
       ],
+      const SizedBox(height: 8),
+      Wrap(spacing: 6, runSpacing: 6, children: [
+        if (prep.includeDsa) Tag('DSA questions', color: tone.accent, icon: Icons.account_tree_outlined),
+        prep.resume == null
+            ? Tag('No CV', color: tone.muted, icon: Icons.description_outlined)
+            : Tag('CV: ${prep.resume!.fileName ?? prepResumeSourceLabel(prep.resume!.source)}', color: tone.accent, icon: Icons.description_outlined),
+      ]),
       if (source != null) ...[
         const SizedBox(height: 8),
         Text(source, style: TextStyle(fontSize: 12, color: tone.muted)),
@@ -428,70 +505,54 @@ class _QuestionCard extends StatelessWidget {
   }
 }
 
-class _PrepEdit {
-  const _PrepEdit({required this.company, required this.role, required this.scheduledAt});
-  final String company;
-  final String role;
-  final DateTime scheduledAt;
-}
+/// One past (or running) mock interview in the prep's list.
+class _MockInterviewTile extends StatelessWidget {
+  const _MockInterviewTile({required this.summary, required this.onTap});
 
-/// Company, role and the interview's date and time.
-class _EditSheet extends StatefulWidget {
-  const _EditSheet({required this.prep});
-
-  final Prep prep;
-
-  @override
-  State<_EditSheet> createState() => _EditSheetState();
-}
-
-class _EditSheetState extends State<_EditSheet> {
-  late final _company = TextEditingController(text: widget.prep.company ?? '');
-  late final _role = TextEditingController(text: widget.prep.role ?? '');
-  late final DateTime _local = widget.prep.scheduledAt.toLocal();
-  late DateTime _date = DateTime(_local.year, _local.month, _local.day);
-  late TimeOfDay _time = TimeOfDay(hour: _local.hour, minute: _local.minute);
-  String? _error;
-
-  @override
-  void dispose() {
-    _company.dispose();
-    _role.dispose();
-    super.dispose();
-  }
-
-  void _save() {
-    if (_company.text.trim().length > 120 || _role.text.trim().length > 120) {
-      setState(() => _error = 'Keep the company and role under 120 characters.');
-      return;
-    }
-    final at = DateTime(_date.year, _date.month, _date.day, _time.hour, _time.minute);
-    Navigator.of(context).pop(_PrepEdit(company: _company.text, role: _role.text, scheduledAt: at));
-  }
+  final MockInterviewSummary summary;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final tone = LearnTone.of(context);
+    final score = summary.overallScore;
+    final statusColor = switch (summary.status) {
+      MockStatus.completed => LearnTone.pass,
+      MockStatus.inProgress || MockStatus.reporting => tone.accent,
+      MockStatus.failed => tone.fail,
+      MockStatus.abandoned => tone.muted,
+    };
+    final detail = [
+      '${summary.answered} answered',
+      if (summary.verdict != null) mockVerdictLabel(summary.verdict!),
+    ].join(' · ');
     return Padding(
-      padding: EdgeInsets.fromLTRB(16, 0, 16, MediaQuery.viewInsetsOf(context).bottom + 24),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text('Edit interview', style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
-          const SizedBox(height: 16),
-          TextField(controller: _company, decoration: const InputDecoration(labelText: 'Company'), textCapitalization: TextCapitalization.words),
-          const SizedBox(height: 12),
-          TextField(controller: _role, decoration: const InputDecoration(labelText: 'Role'), textCapitalization: TextCapitalization.sentences),
-          const SizedBox(height: 16),
-          PrepWhenFields(date: _date, time: _time, onDate: (d) => setState(() => _date = d), onTime: (t) => setState(() => _time = t)),
-          if (_error != null) ...[
-            const SizedBox(height: 8),
-            Text(_error!, style: TextStyle(color: theme.colorScheme.error)),
-          ],
-          const SizedBox(height: 20),
-          FilledButton(onPressed: _save, child: const Text('Save')),
-        ],
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: tone.card,
+        shape: RoundedRectangleBorder(side: BorderSide(color: tone.line), borderRadius: BorderRadius.circular(12)),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+            child: Row(children: [
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    Flexible(child: Text(formatDateTime(context, summary.startedAt), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: tone.strong))),
+                    const SizedBox(width: 8),
+                    Tag(mockStatusLabel(summary.status), color: statusColor),
+                  ]),
+                  const SizedBox(height: 3),
+                  Text(detail, style: TextStyle(fontSize: 12, color: tone.muted)),
+                ]),
+              ),
+              if (score != null) Text(formatPrepScore(score), style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: prepScoreColor(context, score))),
+              Icon(Icons.chevron_right, size: 20, color: tone.muted),
+            ]),
+          ),
+        ),
       ),
     );
   }

@@ -4,6 +4,7 @@ import { learnPaths, LearnLink, useLearnNavigate } from '../../context';
 import { useInterviewPreps } from '../../lib/interview-prep';
 import { countdown, formatWhen } from '../../lib/when';
 
+import { MockInterviewButton } from './PrepDetail';
 import { formatScore, PrepStatusBadge, prepTitle } from './shared';
 
 const WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
@@ -60,8 +61,12 @@ export function UpcomingPreps() {
                     : ''}
                 </div>
               </div>
-              <div className="row items-center g2">
-                {prep.status !== 'READY' ? <PrepStatusBadge status={prep.status} /> : null}
+              <div className="row items-center g2 wrap" style={{ justifyContent: 'flex-end' }}>
+                {prep.status === 'READY' ? (
+                  <MockInterviewButton prep={prep} size="sm" variant="secondary" />
+                ) : (
+                  <PrepStatusBadge status={prep.status} />
+                )}
                 <Badge variant="primary" size="sm">
                   {countdown(prep.scheduledAt, now)}
                 </Badge>

@@ -1,8 +1,11 @@
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 
 import '../config.dart';
 import '../models/envelope.dart';
 import '../models/interview_prep.dart';
+import '../models/mock_interview.dart';
 
 /// What the phone shows when an AI answer needs the desktop and it's off.
 const desktopOfflineAiMessage = "Your desktop is offline: AI answers come back when it's on";
@@ -136,7 +139,7 @@ class ApiClient {
 
   Future<dynamic> get(String path, {Map<String, dynamic>? query, Duration? timeout}) => _send('GET', path, query: query, timeout: timeout);
   Future<dynamic> post(String path, {Object? body, Duration? timeout}) => _send('POST', path, body: body ?? const <String, dynamic>{}, timeout: timeout);
-  Future<dynamic> patch(String path, {Object? body}) => _send('PATCH', path, body: body ?? const <String, dynamic>{});
+  Future<dynamic> patch(String path, {Object? body, Duration? timeout}) => _send('PATCH', path, body: body ?? const <String, dynamic>{}, timeout: timeout);
   Future<dynamic> put(String path, {Object? body}) => _send('PUT', path, body: body ?? const <String, dynamic>{});
   Future<dynamic> delete(String path) => _send('DELETE', path);
 
@@ -243,7 +246,15 @@ class ApiClient {
 
   /// Starts a prep; it comes back `GENERATING`. [scheduledAt] is local time,
   /// sent as an ISO date-time with its offset.
-  Future<Prep> createPrep({String? company, String? role, String? jobDescription, List<String> technologies = const [], required DateTime scheduledAt}) async {
+  Future<Prep> createPrep({
+    String? company,
+    String? role,
+    String? jobDescription,
+    List<String> technologies = const [],
+    required DateTime scheduledAt,
+    bool includeDsa = false,
+    PrepResume? resume,
+  }) async {
     String? orNull(String? s) => s == null || s.trim().isEmpty ? null : s.trim();
     return _prep(await post('/interview-preps', body: {
       'company': orNull(company),
@@ -251,15 +262,34 @@ class ApiClient {
       'jobDescription': orNull(jobDescription),
       'technologies': technologies,
       'scheduledAt': isoWithOffset(scheduledAt),
+      'includeDsa': includeDsa,
+      if (resume != null) 'resume': resume.toJson(),
     }));
   }
 
-  /// Changes the company, role or interview time (only what's given; an
-  /// empty company or role clears it).
-  Future<Prep> updatePrep(String id, {String? company, String? role, DateTime? scheduledAt}) async => _prep(await patch(_prepPath(id), body: {
+  /// Changes a prep (only what's given; an empty company, role or job
+  /// description clears it). Changing the job description, technologies,
+  /// DSA or the CV ([resume], or [removeResume]) rewrites the plan and
+  /// questions: the prep comes back `GENERATING`.
+  Future<Prep> updatePrep(
+    String id, {
+    String? company,
+    String? role,
+    DateTime? scheduledAt,
+    String? jobDescription,
+    List<String>? technologies,
+    bool? includeDsa,
+    PrepResume? resume,
+    bool removeResume = false,
+  }) async =>
+      _prep(await patch(_prepPath(id), body: {
         if (company != null) 'company': company.trim().isEmpty ? null : company.trim(),
         if (role != null) 'role': role.trim().isEmpty ? null : role.trim(),
         if (scheduledAt != null) 'scheduledAt': isoWithOffset(scheduledAt),
+        if (jobDescription != null) 'jobDescription': jobDescription.trim().isEmpty ? null : jobDescription.trim(),
+        'technologies': ?technologies,
+        'includeDsa': ?includeDsa,
+        if (resume != null) 'resume': resume.toJson() else if (removeResume) 'resume': null,
       }));
 
   Future<void> deletePrep(String id) => delete(_prepPath(id));
@@ -274,4 +304,61 @@ class ApiClient {
     if (j is! Map) throw const ApiException(status: 0, type: 'bad-reply', title: 'Unexpected reply from the server.');
     return PrepQuestion.fromJson(j.cast<String, dynamic>());
   }
+
+  /// Reads the text out of a CV file (.pdf, .docx, .txt, .md, 4 MB at most).
+  /// Fails with a validation error when the type isn't supported or no text
+  /// comes out (a scanned PDF).
+  Future<CvExtract> extractCv(String fileName, List<int> bytes) async {
+    final j = await post('/interview-preps/cv/extract', body: {'fileName': fileName, 'contentBase64': base64Encode(bytes)}, timeout: const Duration(seconds: 90));
+    if (j is! Map) throw const ApiException(status: 0, type: 'bad-reply', title: 'Unexpected reply from the server.');
+    return CvExtract.fromJson(j.cast<String, dynamic>());
+  }
+
+  /// A CV written from the user's synced Offerpath profile; null when there
+  /// isn't one.
+  Future<String?> profileCv() async {
+    final j = await get('/interview-preps/cv/profile');
+    final text = j is Map ? j['text'] : null;
+    return text is String && text.trim().isNotEmpty ? text : null;
+  }
+
+  // -- Mock interviews ------------------------------------------------------
+
+  static String _mockPath(String id) => '/mock-interviews/${Uri.encodeComponent(id)}';
+
+  static MockInterview _mock(dynamic j) {
+    if (j is! Map) throw const ApiException(status: 0, type: 'bad-reply', title: 'Unexpected reply from the server.');
+    return MockInterview.fromJson(j.cast<String, dynamic>());
+  }
+
+  /// The prep's mock interview still in progress, or a new one (the opening
+  /// question is there at once). [restart] abandons the one in progress.
+  Future<MockInterview> startMockInterview(String prepId, {bool restart = false}) async =>
+      _mock(await post('${_prepPath(prepId)}/mock-interviews', body: {if (restart) 'restart': true}, timeout: const Duration(seconds: 60)));
+
+  Future<MockInterview> getMockInterview(String id) async => _mock(await get(_mockPath(id)));
+
+  /// Sends an answer and waits for the interviewer's next turn (5-60 s, so
+  /// [aiTimeout]). A 503 `ai-unavailable` still saves the answer: retry with
+  /// [replyMockInterview].
+  Future<MockInterview> answerMockInterview(String id, {String? text, String? code, String? codeLanguage}) async {
+    final t = text?.trim() ?? '';
+    final c = code == null || code.trim().isEmpty ? null : code;
+    return _mock(await post('${_mockPath(id)}/answer', body: {
+      if (t.isNotEmpty) 'text': t,
+      'code': ?c,
+      if (c != null && codeLanguage != null) 'codeLanguage': codeLanguage,
+    }, timeout: aiTimeout));
+  }
+
+  /// Retries the interviewer's reply to the last answer.
+  Future<MockInterview> replyMockInterview(String id) async => _mock(await post('${_mockPath(id)}/reply', timeout: aiTimeout));
+
+  /// Ends the interview now; the report is written in the background.
+  Future<MockInterview> finishMockInterview(String id) async => _mock(await post('${_mockPath(id)}/finish', timeout: const Duration(seconds: 60)));
+
+  /// Writes a failed report again.
+  Future<MockInterview> retryMockReport(String id) async => _mock(await post('${_mockPath(id)}/report', timeout: const Duration(seconds: 60)));
+
+  Future<void> deleteMockInterview(String id) => delete(_mockPath(id));
 }

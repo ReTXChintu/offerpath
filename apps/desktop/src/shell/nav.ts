@@ -87,6 +87,7 @@ export const MORE: NavEntry[] = [
 const ALSO: Record<string, string[]> = {
   '/learn': ['/concept'],
   '/practice': ['/exercise', '/project', '/challenge'],
+  '/interview-prep': ['/mock-interview'],
 };
 
 export function isActive(entryPath: string, current: string): boolean {

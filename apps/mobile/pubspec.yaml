@@ -27,6 +27,7 @@ dependencies:
   # Spoken mock interviews. The platform recogniser turns speech into text on
   # the phone: nothing is recorded and no audio leaves the device.
   speech_to_text: ^7.3.0
+  file_picker: ^13.1.0
 
 dev_dependencies:
   flutter_test:

@@ -34,6 +34,7 @@ import {
   ExerciseRoute,
   InterviewPrepRoute,
   InterviewRoute,
+  MockInterviewRoute,
   ProjectRoute,
   RequireAccount,
   TechnologyRoute,
@@ -72,6 +73,7 @@ const routeTree = rootRoute.addChildren([
   learn('/interview-prep', InterviewPrepList),
   learn('/interview-prep/new', PrepCreate),
   learn('/interview-prep/$prepId', InterviewPrepRoute),
+  learn('/mock-interview/$interviewId', MockInterviewRoute),
   learn('/progress', DesktopProgress),
   learn('/onboarding', Onboarding),
   // Hunt: @offerpath/hunt's pages over the Tauri client.

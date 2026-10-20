@@ -6,6 +6,7 @@ library;
 
 import '../services/api_client.dart';
 import 'json.dart';
+import 'mock_interview.dart';
 
 /// What the phone shows when a prep AI call can't run anywhere: the laptop
 /// is offline and no OpenAI key is saved (a 503 `ai-unavailable`).
@@ -125,7 +126,7 @@ class PrepQuestion {
   final String id;
   final int order;
 
-  /// TECHNICAL | SYSTEM_DESIGN | CODING | BEHAVIORAL | COMPANY
+  /// TECHNICAL | SYSTEM_DESIGN | CODING | DSA | BEHAVIORAL | COMPANY
   final String kind;
   final String topic;
   final String question;
@@ -157,6 +158,42 @@ class PrepProgress {
   final double? averageScore;
 }
 
+/// Where a prep's CV came from.
+enum PrepResumeSource { upload, profile, pasted }
+
+PrepResumeSource prepResumeSourceOf(dynamic v) => switch (str(v).toLowerCase()) {
+      'upload' => PrepResumeSource.upload,
+      'profile' => PrepResumeSource.profile,
+      _ => PrepResumeSource.pasted,
+    };
+
+String prepResumeSourceLabel(PrepResumeSource source) => switch (source) {
+      PrepResumeSource.upload => 'Uploaded file',
+      PrepResumeSource.profile => 'Offerpath profile',
+      PrepResumeSource.pasted => 'Pasted text',
+    };
+
+/// The CV the prep and its mock interviews read.
+class PrepResume {
+  const PrepResume({required this.source, required this.text, this.fileName, int? chars}) : chars = chars ?? text.length;
+
+  factory PrepResume.fromJson(Map<String, dynamic> j) {
+    final text = str(j['text']);
+    return PrepResume(source: prepResumeSourceOf(j['source']), text: text, fileName: optStr(j['fileName']), chars: intOf(j['chars'], text.length));
+  }
+
+  final PrepResumeSource source;
+  final String text;
+  final String? fileName;
+  final int chars;
+
+  /// The body `resume` field of a create or update.
+  Map<String, dynamic> toJson() => {'text': text, 'source': source.name, 'fileName': fileName};
+
+  /// Whether [other] says the same thing (an edit changes the plan when not).
+  bool sameAs(PrepResume? other) => other != null && other.source == source && other.text.trim() == text.trim() && (other.fileName ?? '') == (fileName ?? '');
+}
+
 /// One interview being prepared for.
 class Prep {
   const Prep({
@@ -173,6 +210,9 @@ class Prep {
     required this.questions,
     required this.progress,
     required this.createdAt,
+    this.includeDsa = false,
+    this.resume,
+    this.mockInterviews = const [],
   });
 
   factory Prep.fromJson(Map<String, dynamic> j) => Prep(
@@ -189,6 +229,9 @@ class Prep {
         questions: mapList(j['questions']).map(PrepQuestion.fromJson).toList()..sort((a, b) => a.order.compareTo(b.order)),
         progress: PrepProgress.fromJson(mapOrEmpty(j['progress'])),
         createdAt: dateOf(j['createdAt']),
+        includeDsa: boolOf(j['includeDsa']),
+        resume: asMap(j['resume']) == null || str(asMap(j['resume'])!['text']).trim().isEmpty ? null : PrepResume.fromJson(asMap(j['resume'])!),
+        mockInterviews: mapList(j['mockInterviews']).map(MockInterviewSummary.fromJson).toList()..sort((a, b) => b.startedAt.compareTo(a.startedAt)),
       );
 
   final String id;
@@ -206,6 +249,16 @@ class Prep {
   final List<PrepQuestion> questions;
   final PrepProgress progress;
   final DateTime? createdAt;
+
+  /// DSA questions in the prep, DSA problems in its mock interviews.
+  final bool includeDsa;
+  final PrepResume? resume;
+
+  /// Newest first.
+  final List<MockInterviewSummary> mockInterviews;
+
+  /// The mock interview still going, if any.
+  MockInterviewSummary? get activeMockInterview => mockInterviews.where((m) => m.isInProgress).firstOrNull;
 
   bool get isGenerating => status == PrepStatus.generating;
   bool get isReady => status == PrepStatus.ready;
@@ -248,11 +301,14 @@ class Prep {
       questions: questions,
       progress: PrepProgress(answered: scored.length, total: questions.length, averageScore: average),
       createdAt: createdAt,
+      includeDsa: includeDsa,
+      resume: resume,
+      mockInterviews: mockInterviews,
     );
   }
 }
 
-const prepKindOrder = ['TECHNICAL', 'CODING', 'SYSTEM_DESIGN', 'BEHAVIORAL', 'COMPANY'];
+const prepKindOrder = ['TECHNICAL', 'CODING', 'DSA', 'SYSTEM_DESIGN', 'BEHAVIORAL', 'COMPANY'];
 
 int _kindRank(String kind) {
   final i = prepKindOrder.indexOf(kind);
@@ -263,6 +319,7 @@ String prepKindLabel(String kind) => switch (kind) {
       'TECHNICAL' => 'Technical',
       'SYSTEM_DESIGN' => 'System design',
       'CODING' => 'Coding',
+      'DSA' => 'DSA',
       'BEHAVIORAL' => 'Behavioural',
       'COMPANY' => 'About the company',
       _ => kind.isEmpty ? 'Other' : kind[0] + kind.substring(1).toLowerCase().replaceAll('_', ' '),

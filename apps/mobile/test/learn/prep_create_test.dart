@@ -85,6 +85,7 @@ void main() {
       expect(find.widgetWithText(InputChip, 'React'), findsOneWidget);
       expect(find.widgetWithText(InputChip, 'TypeScript'), findsOneWidget);
 
+      await tester.ensureVisible(find.text('Pick date'));
       await tester.tap(find.text('Pick date'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('OK'));
@@ -122,6 +123,7 @@ void main() {
       final fake = await pump(tester);
       fake.offline = true;
       await tester.enterText(find.widgetWithText(TextField, 'Job description'), 'Senior Go engineer, Kafka, Postgres.');
+      await tester.ensureVisible(find.text('Pick date'));
       await tester.tap(find.text('Pick date'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('OK'));

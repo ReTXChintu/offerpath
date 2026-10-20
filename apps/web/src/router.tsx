@@ -6,6 +6,7 @@ import {
   InterviewGuide,
   InterviewPrepList,
   InterviewSession,
+  MockInterviewPage,
   Onboarding,
   PracticePage,
   PrepCreate,
@@ -82,6 +83,11 @@ const routeTree = rootRoute.addChildren([
   page(
     '/interview-prep/$prepId',
     withParam('prepId', (id) => <PrepDetail key={id} prepId={id} />),
+  ),
+  // A prep's mock interview, by the interview's id (the phone's linkPage 'mock-interview').
+  page(
+    '/mock-interview/$interviewId',
+    withParam('interviewId', (id) => <MockInterviewPage key={id} interviewId={id} />),
   ),
   page('/progress', WebProgress),
   page('/onboarding', Onboarding),

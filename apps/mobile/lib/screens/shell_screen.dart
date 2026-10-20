@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../logic/filters.dart';
 import '../learn/learn_screen.dart';
+import '../learn/mock_interview_page.dart';
 import '../learn/prep_detail_page.dart';
 import '../logic/links.dart';
 import '../services/link_bus.dart';
@@ -39,6 +40,9 @@ void openAppLink(BuildContext context, AppLink link) {
       openPrep(context, link.id!);
     case LinkKind.interviewPreps:
       nav.openLearn(learnPrep);
+    case LinkKind.mockInterview:
+      nav.openLearn(learnPrep);
+      openMockInterview(context, link.id!);
     case LinkKind.home:
       nav.select(tabToday);
   }

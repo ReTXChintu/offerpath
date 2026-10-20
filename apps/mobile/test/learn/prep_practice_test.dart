@@ -108,11 +108,15 @@ void main() {
       expect(find.text('Rendering'), findsOneWidget);
       expect(find.text('Day 1'), findsOneWidget);
       expect(find.text('Re-read React rendering'), findsOneWidget);
+      await tester.scrollUntilVisible(find.text('TECHNICAL · 1'), 200);
       expect(find.text('TECHNICAL · 1'), findsOneWidget);
       expect(find.text('SYSTEM DESIGN · 1'), findsOneWidget);
+      await tester.scrollUntilVisible(find.text('BEHAVIOURAL · 1'), 200);
       expect(find.text('BEHAVIOURAL · 1'), findsOneWidget);
+      await tester.scrollUntilVisible(find.text('0 of 3 practised'), -200);
       expect(find.text('0 of 3 practised'), findsOneWidget);
 
+      await tester.scrollUntilVisible(find.text('How does React decide when to re-render a component?'), 200);
       await tester.tap(find.text('How does React decide when to re-render a component?'));
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField), 'x');
@@ -120,6 +124,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.pageBack();
       await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(find.text('1 of 3 practised'), -200);
       expect(find.text('1 of 3 practised'), findsOneWidget);
       expect(find.text('8/10'), findsWidgets);
     });

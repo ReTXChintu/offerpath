@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import type { AIProvider, CallContext, PromptSpec } from '../provider/ai-provider.port.js';
 
+import { list, text, wholeNumber } from './lenient.js';
 import { PROMPT_VERSION } from './policy.js';
 
 /**
@@ -11,7 +12,9 @@ import { PROMPT_VERSION } from './policy.js';
  * the user's practice answers against those key points.
  *
  * Questions are the interviewer's, not exercises: no answer text is shown
- * up front, only the key points, after the user has tried.
+ * up front, only the key points, after the user has tried. With the user's
+ * CV, questions probe what they claim; with DSA on, some are algorithm
+ * problems.
  */
 
 export const PREP_QUESTION_KINDS = [
@@ -20,38 +23,8 @@ export const PREP_QUESTION_KINDS = [
   'CODING',
   'BEHAVIORAL',
   'COMPANY',
+  'DSA',
 ] as const;
-
-/*
- * Forgiving on purpose. Length and range limits never reach the model (strict
- * structured output drops those keywords, see strict-schema.ts), so a long
- * topic or a priority of 4 is normal, not a broken answer. A whole plan is
- * expensive to redo, so overlong text is shortened, numbers are pulled into
- * range and extra list items dropped, instead of failing the prep. Only a
- * missing or empty field still fails.
- */
-
-/** Trimmed and shortened to `max` characters, ending in an ellipsis when cut. */
-function text(max: number) {
-  return z
-    .string()
-    .trim()
-    .min(1)
-    .transform((s) => (s.length <= max ? s : `${s.slice(0, max - 1).trimEnd()}…`));
-}
-
-/** Rounded and clamped into [min, max]. */
-function wholeNumber(min: number, max: number) {
-  return z.number().transform((n) => Math.min(max, Math.max(min, Math.round(n))));
-}
-
-/** At least `min` items; anything past `max` is dropped. */
-function list<T extends z.ZodTypeAny>(item: T, min: number, max: number) {
-  return z
-    .array(item)
-    .min(min)
-    .transform((items) => items.slice(0, max));
-}
 
 export const prepQuestionSchema = z.object({
   kind: z.enum(PREP_QUESTION_KINDS),
@@ -88,6 +61,10 @@ export interface InterviewPrepInput {
   role: string | null;
   jobDescription: string | null;
   technologies: readonly string[];
+  /** The CV the user interviews with, as text. */
+  resume?: string | null;
+  /** Add data structures and algorithms questions. */
+  includeDsa?: boolean;
   /** Whole days from now until the interview (0 = today). */
   daysUntil: number;
   /** What the user already practised, so the plan doesn't repeat it. */
@@ -119,6 +96,8 @@ Rules:
 - Order focus areas by how likely they are to be tested and how costly a gap would be (priority 1 = highest).
 - The schedule fits the days left. With one day, it is one focused day. Never more days than are left.
 - No trick questions, no trivia about version numbers.
+- When a CV is given, tie some questions to what it claims (a project, a technology, a number) the way a real interviewer probes a CV, and weigh the focus areas by the gap between the CV and the job.
+- When DSA is asked for, include 3 or 4 questions of kind DSA: algorithm and data-structure problems at the level this role's interviews use (arrays, hashing, two pointers, trees, graphs, heaps, dynamic programming...). State each like an interview problem with a small example; the key points are the approach, its time and space complexity, and the edge cases. Without DSA, use no DSA questions.
 
 Sizes (longer text is cut off):
 - summary: two or three sentences, under 900 characters.
@@ -137,6 +116,8 @@ Sizes (longer text is cut off):
             input.jobDescription
               ? `Job description:\n"""\n${input.jobDescription.slice(0, 12_000)}\n"""`
               : '',
+            input.resume ? `The candidate's CV:\n"""\n${input.resume.slice(0, 12_000)}\n"""` : '',
+            input.includeDsa ? 'Include DSA questions.' : '',
             input.knownStrengths && input.knownStrengths.length > 0
               ? `Already strong in: ${input.knownStrengths.join(', ')}`
               : '',

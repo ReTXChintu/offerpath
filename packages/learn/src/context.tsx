@@ -31,6 +31,8 @@ export const learnPaths = {
   interviewPreps: '/interview-prep',
   interviewPrepNew: '/interview-prep/new',
   interviewPrep: (prepId: string) => `/interview-prep/${encodeURIComponent(prepId)}`,
+  // A mock interview for a prep, by the interview's id (the phone's linkPage 'mock-interview').
+  mockInterview: (interviewId: string) => `/mock-interview/${encodeURIComponent(interviewId)}`,
   progress: '/progress',
   onboarding: '/onboarding',
   settings: '/settings?tab=goal',

@@ -70,6 +70,7 @@ export const GET_APPS: NavEntry = {
 const ALSO: Record<string, string[]> = {
   '/learn': ['/concept'],
   '/practice': ['/exercise', '/project', '/challenge'],
+  '/interview-prep': ['/mock-interview'],
 };
 
 /** Whether a sidebar entry is the current page (sub-pages count: /jobs/42 → Jobs). */
