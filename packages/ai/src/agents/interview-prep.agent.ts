@@ -22,35 +22,62 @@ export const PREP_QUESTION_KINDS = [
   'COMPANY',
 ] as const;
 
+/*
+ * Forgiving on purpose. Length and range limits never reach the model (strict
+ * structured output drops those keywords, see strict-schema.ts), so a long
+ * topic or a priority of 4 is normal, not a broken answer. A whole plan is
+ * expensive to redo, so overlong text is shortened, numbers are pulled into
+ * range and extra list items dropped, instead of failing the prep. Only a
+ * missing or empty field still fails.
+ */
+
+/** Trimmed and shortened to `max` characters, ending in an ellipsis when cut. */
+function text(max: number) {
+  return z
+    .string()
+    .trim()
+    .min(1)
+    .transform((s) => (s.length <= max ? s : `${s.slice(0, max - 1).trimEnd()}…`));
+}
+
+/** Rounded and clamped into [min, max]. */
+function wholeNumber(min: number, max: number) {
+  return z.number().transform((n) => Math.min(max, Math.max(min, Math.round(n))));
+}
+
+/** At least `min` items; anything past `max` is dropped. */
+function list<T extends z.ZodTypeAny>(item: T, min: number, max: number) {
+  return z
+    .array(item)
+    .min(min)
+    .transform((items) => items.slice(0, max));
+}
+
 export const prepQuestionSchema = z.object({
   kind: z.enum(PREP_QUESTION_KINDS),
   /** The technology or theme it belongs to ("React", "Ownership", ...). */
-  topic: z.string().min(1).max(80),
-  question: z.string().min(10).max(600),
+  topic: text(80),
+  question: text(600),
   /** What a strong answer covers, as short points. Shown after the attempt. */
-  keyPoints: z.array(z.string().min(3).max(240)).min(2).max(7),
-  difficulty: z.number().int().min(1).max(5),
+  keyPoints: list(text(240), 1, 7),
+  difficulty: wholeNumber(1, 5),
 });
 
 export const interviewPrepSchema = z.object({
   /** Two or three sentences: what this interview will most likely test, and why. */
-  summary: z.string().min(20).max(900),
-  focusAreas: z
-    .array(
-      z.object({
-        topic: z.string().min(1).max(80),
-        why: z.string().min(5).max(300),
-        priority: z.number().int().min(1).max(3),
-      }),
-    )
-    .min(1)
-    .max(8),
+  summary: text(900),
+  focusAreas: list(
+    z.object({
+      topic: text(80),
+      why: text(300),
+      priority: wholeNumber(1, 3),
+    }),
+    1,
+    8,
+  ),
   /** One entry per day until the interview (the last is the day before). */
-  schedule: z
-    .array(z.object({ day: z.number().int().min(1).max(30), focus: z.string().min(3).max(240) }))
-    .min(1)
-    .max(14),
-  questions: z.array(prepQuestionSchema).min(4).max(24),
+  schedule: list(z.object({ day: wholeNumber(1, 30), focus: text(240) }), 1, 14),
+  questions: list(prepQuestionSchema, 1, 24),
 });
 
 export type PrepQuestionOutput = z.infer<typeof prepQuestionSchema>;
@@ -91,7 +118,13 @@ Rules:
 - Each question gets 2-7 key points: what a strong answer must cover. Points, not a model answer to memorise.
 - Order focus areas by how likely they are to be tested and how costly a gap would be (priority 1 = highest).
 - The schedule fits the days left. With one day, it is one focused day. Never more days than are left.
-- No trick questions, no trivia about version numbers.`,
+- No trick questions, no trivia about version numbers.
+
+Sizes (longer text is cut off):
+- summary: two or three sentences, under 900 characters.
+- focus area topic: a short name, under 80 characters ("React rendering", not a sentence); why: one sentence. Priority is 1, 2 or 3 only.
+- schedule focus: one line per day. Question topic: a short name, under 80 characters. Difficulty is 1-5.
+- key points: short phrases, under 240 characters each.`,
         },
         {
           role: 'user',
@@ -134,11 +167,11 @@ Rules:
 
 export const prepAnswerGradeSchema = z.object({
   /** 0-10 against the key points, not against perfection. */
-  score: z.number().int().min(0).max(10),
-  covered: z.array(z.string().max(240)).max(7),
-  missed: z.array(z.string().max(240)).max(7),
+  score: wholeNumber(0, 10),
+  covered: list(text(240), 0, 7),
+  missed: list(text(240), 0, 7),
   /** Two or three sentences the user can act on in the next attempt. */
-  feedback: z.string().min(10).max(900),
+  feedback: text(900),
 });
 
 export type PrepAnswerGradeOutput = z.infer<typeof prepAnswerGradeSchema>;
