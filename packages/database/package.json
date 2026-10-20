@@ -24,7 +24,7 @@
     "migrate:deploy": "dotenv -e ../../.env -- prisma migrate deploy",
     "studio": "dotenv -e ../../.env -- prisma studio",
     "validate": "prisma validate",
-    "typecheck": "pnpm generate && tsc --noEmit",
+    "typecheck": "tsc --noEmit",
     "lint": "eslint src",
     "test": "vitest run --passWithNoTests",
     "import:job-hunter": "dotenv -e ../../.env -- tsx src/import/job-hunter.ts",

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    // The client is generated once, by this package's build. Generating it in
+    // typecheck too raced that build, and tsc read a half-written client.
+    "typecheck": {
+      "dependsOn": ["^build", "build"],
+      "outputs": []
+    }
+  }
+}
