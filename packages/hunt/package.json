@@ -1,6 +1,6 @@
 {
   "name": "@offerpath/hunt",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "The hunt side of Offerpath: Job Hunter's pages and components on @offerpath/ui, over an injected client.",
   "type": "module",

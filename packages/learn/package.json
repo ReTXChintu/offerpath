@@ -1,6 +1,6 @@
 {
   "name": "@offerpath/learn",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "The learning side of Offerpath: ForgeRoutine's pages on @offerpath/ui, over an injected API client, plus Today.",
   "type": "module",
