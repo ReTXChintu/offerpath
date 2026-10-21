@@ -44,6 +44,7 @@ model User {
   aiFallbackKey     AiFallbackKey?
   interviewPreps    InterviewPrep[]
   mockInterviews    MockInterview[]
+  livePractice      LivePracticeSession[]
   conceptChats      ConceptChatMessage[]
   questionAnswers   ConceptQuestionAnswer[]
   assignments       PracticeAssignment[]
@@ -1536,6 +1537,7 @@ model InterviewPrep {
 
   questions      InterviewPrepQuestion[]
   mockInterviews MockInterview[]
+  livePractice   LivePracticeSession[]
 
   @@index([userId, scheduledAt])
   @@map("interview_preps")
@@ -1629,4 +1631,73 @@ model InterviewPrepQuestion {
 
   @@index([prepId, order])
   @@map("interview_prep_questions")
+}
+
+enum LivePracticeStatus {
+  ACTIVE
+  ENDED
+}
+
+/// Two people practising interviews face to face while the phone listens:
+/// questions get AI answers, spoken answers get graded. See
+/// docs/live-practice.md. OpenAI only, on the user's own key.
+model LivePracticeSession {
+  id           String             @id @default(cuid())
+  userId       String
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// The prep whose JD, technologies and CV the answers use; optional.
+  prepId       String?
+  prep         InterviewPrep?     @relation(fields: [prepId], references: [id], onDelete: SetNull)
+  title        String
+  technologies String[]           @default([])
+  /// "me" (answers from the user's CV) or "neutral".
+  answerFor    String             @default("me")
+  status       LivePracticeStatus @default(ACTIVE)
+  createdAt    DateTime           @default(now())
+  endedAt      DateTime?
+  updatedAt    DateTime           @updatedAt
+
+  lines     LivePracticeLine[]
+  questions LivePracticeQuestion[]
+
+  @@index([userId, createdAt])
+  @@map("live_practice_sessions")
+}
+
+/// What was said, one transcribed stretch of speech per line.
+model LivePracticeLine {
+  id         String              @id @default(cuid())
+  sessionId  String
+  session    LivePracticeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  order      Int
+  text       String
+  /// QUESTION, ANSWER or OTHER.
+  kind       String
+  questionId String?
+  durationMs Int?
+  createdAt  DateTime            @default(now())
+
+  @@unique([sessionId, order])
+  @@map("live_practice_lines")
+}
+
+model LivePracticeQuestion {
+  id        String              @id @default(cuid())
+  sessionId String
+  session   LivePracticeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  order     Int
+  text      String
+  /// "me" or "neutral": what the AI answer was written for.
+  answerFor String
+  /// { summary, points[], detail } from the live practice agent.
+  aiAnswer  Json
+  /// The spoken answer graded against the AI answer's points.
+  score     Int?
+  /// { covered[], missed[], feedback }.
+  feedback  Json?
+  gradedAt  DateTime?
+  createdAt DateTime            @default(now())
+
+  @@unique([sessionId, order])
+  @@map("live_practice_questions")
 }

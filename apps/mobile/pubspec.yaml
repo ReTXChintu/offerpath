@@ -28,6 +28,11 @@ dependencies:
   # the phone: nothing is recorded and no audio leaves the device.
   speech_to_text: ^7.3.0
   file_picker: ^13.1.0
+  # Live practice: records the microphone in short segments (AAC, m4a) and
+  # uploads them to the API, which transcribes them with the user's OpenAI
+  # key. Exact pins: newer releases are under the two-week rule.
+  record: 7.1.1
+  wakelock_plus: 1.8.1
 
 dev_dependencies:
   flutter_test:

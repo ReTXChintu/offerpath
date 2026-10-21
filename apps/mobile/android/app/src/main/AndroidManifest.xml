@@ -7,7 +7,8 @@
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <!-- Spoken mock interviews: the platform recogniser turns speech into
-         text on the phone; only the text is sent. -->
+         text on the phone; only the text is sent. Live practice records
+         short audio segments and uploads them to be transcribed. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <application
         android:label="Offerpath"

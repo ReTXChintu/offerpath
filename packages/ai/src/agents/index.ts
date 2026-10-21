@@ -12,3 +12,4 @@ export * from './concept.agent.js';
 export * from './practice-set.agent.js';
 export * from './interview-prep.agent.js';
 export * from './mock-interview.agent.js';
+export * from './live-practice.agent.js';

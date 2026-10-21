@@ -4,12 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/interview_prep.dart';
+import '../models/live_practice.dart';
 import '../models/mock_interview.dart';
 import '../services/api_client.dart';
 import '../state/auth_controller.dart';
 import '../state/interview_prep_controller.dart';
 import '../util/format.dart';
 import '../widgets/common.dart';
+import 'live/live_practice_list_page.dart';
 import 'mock_interview_page.dart';
 import 'prep_create_page.dart';
 import 'prep_cv_field.dart';
@@ -146,6 +148,29 @@ class _PrepDetailPageState extends State<PrepDetailPage> {
     await _openMock(interview.id, initial: interview);
   }
 
+  /// Live practice with a partner, its AI answers written for this prep.
+  /// It needs the user's OpenAI key: without one, says where to add it.
+  Future<void> _startLive() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    LiveReady? ready;
+    LivePracticeView? view;
+    try {
+      ready = await widget.api.livePracticeReady();
+      if (ready.ready) view = await widget.api.startLivePractice(prepId: widget.prepId);
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(liveErrorMessage(error))));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+    if (!mounted) return;
+    if (ready != null && !ready.ready) {
+      await showLiveNotReady(context, ready.reason);
+    } else if (view != null) {
+      await openLivePractice(context, widget.api, view.id, initial: view, autoStart: true);
+    }
+  }
+
   Future<void> _openMock(String id, {MockInterview? initial}) async {
     await Navigator.of(context).push(MaterialPageRoute<void>(
       builder: (_) => MockInterviewPage(api: widget.api, interviewId: id, initial: initial, title: _prep?.title, preps: widget.preps, voice: widget.voice),
@@ -221,6 +246,7 @@ class _PrepDetailPageState extends State<PrepDetailPage> {
                   if (prep.isGenerating) _generating(context),
                   if (prep.isFailed) _failed(context, prep),
                   if (prep.isReady) _mockCard(context, prep),
+                  if (prep.isReady) _liveButton(context),
                   if (prep.mockInterviews.isNotEmpty) ...[
                     const SizedBox(height: 22),
                     SectionLabel('Mock interviews · ${prep.mockInterviews.length}'),
@@ -301,6 +327,18 @@ class _PrepDetailPageState extends State<PrepDetailPage> {
       ]),
     );
   }
+
+  /// "Practise live with a partner": the phone listens while two people ask
+  /// each other this prep's kind of questions.
+  Widget _liveButton(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(top: 10),
+        child: OutlinedButton.icon(
+          onPressed: _busy ? null : _startLive,
+          style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12)),
+          icon: const Icon(Icons.people_alt_outlined),
+          label: const Text('Practise live with a partner'),
+        ),
+      );
 
   List<Widget> _ready(BuildContext context, Prep prep) {
     final tone = LearnTone.of(context);

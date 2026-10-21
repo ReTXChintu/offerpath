@@ -110,6 +110,7 @@ void main() {
       expect(find.text('Re-read React rendering'), findsOneWidget);
       await tester.scrollUntilVisible(find.text('TECHNICAL · 1'), 200);
       expect(find.text('TECHNICAL · 1'), findsOneWidget);
+      await tester.scrollUntilVisible(find.text('SYSTEM DESIGN · 1'), 200);
       expect(find.text('SYSTEM DESIGN · 1'), findsOneWidget);
       await tester.scrollUntilVisible(find.text('BEHAVIOURAL · 1'), 200);
       expect(find.text('BEHAVIOURAL · 1'), findsOneWidget);

@@ -75,7 +75,7 @@ const tabToday = 0, tabLearn = 1, tabHunt = 2, tabAlerts = 3, tabMore = 4;
 const huntApplications = 0, huntJobs = 1;
 
 /// The Learn tab's pages.
-const learnRoutine = 0, learnRecall = 1, learnInterviews = 2, learnPrep = 3, learnReading = 4;
+const learnRoutine = 0, learnRecall = 1, learnInterviews = 2, learnPrep = 3, learnReading = 4, learnLive = 5;
 
 /// The tab a link lands on (an application detail opens over Hunt, job
 /// sites over More, an interview prep or a mock interview over Learn).

@@ -5,6 +5,7 @@ import 'package:dio/dio.dart';
 import '../config.dart';
 import '../models/envelope.dart';
 import '../models/interview_prep.dart';
+import '../models/live_practice.dart';
 import '../models/mock_interview.dart';
 
 /// What the phone shows when an AI answer needs the desktop and it's off.
@@ -361,4 +362,66 @@ class ApiClient {
   Future<MockInterview> retryMockReport(String id) async => _mock(await post('${_mockPath(id)}/report', timeout: const Duration(seconds: 60)));
 
   Future<void> deleteMockInterview(String id) => delete(_mockPath(id));
+
+  // -- Live practice ----------------------------------------------------------
+
+  static String _livePath(String id) => '/live-practice/${Uri.encodeComponent(id)}';
+
+  static LivePracticeView _live(dynamic j) {
+    if (j is! Map) throw const ApiException(status: 0, type: 'bad-reply', title: 'Unexpected reply from the server.');
+    return LivePracticeView.fromJson(j.cast<String, dynamic>());
+  }
+
+  /// Whether live practice can start (it needs the user's OpenAI key).
+  Future<LiveReady> livePracticeReady() async {
+    final j = await get('/live-practice/ready');
+    if (j is! Map) throw const ApiException(status: 0, type: 'bad-reply', title: 'Unexpected reply from the server.');
+    return LiveReady.fromJson(j.cast<String, dynamic>());
+  }
+
+  /// Every live-practice session, newest first.
+  Future<List<LivePracticeSummary>> listLivePractice() async {
+    final j = await get('/live-practice');
+    final list = j is Map ? j['sessions'] : j;
+    return (list is List ? list : const []).whereType<Map>().map((m) => LivePracticeSummary.fromJson(m.cast<String, dynamic>())).toList();
+  }
+
+  /// Starts a session (for a prep, or for [technologies]). Fails with 400
+  /// when no OpenAI key is saved.
+  Future<LivePracticeView> startLivePractice({String? prepId, List<String> technologies = const [], String? title, AnswerFor answerFor = AnswerFor.me}) async {
+    final t = title?.trim() ?? '';
+    final techs = technologies.map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+    return _live(await post('/live-practice', body: {
+      'prepId': ?prepId,
+      if (techs.isNotEmpty) 'technologies': techs,
+      if (t.isNotEmpty) 'title': t,
+      'answerFor': answerForValue(answerFor),
+    }, timeout: const Duration(seconds: 60)));
+  }
+
+  Future<LivePracticeView> getLivePractice(String id) async => _live(await get(_livePath(id)));
+
+  /// [answerFor] applies to questions asked from now on.
+  Future<LivePracticeView> updateLivePractice(String id, {AnswerFor? answerFor, String? title}) async => _live(await patch(_livePath(id), body: {
+        if (answerFor != null) 'answerFor': answerForValue(answerFor),
+        if (title != null && title.trim().isNotEmpty) 'title': title.trim(),
+      }));
+
+  /// Sends one recorded segment (m4a, up to 4 MB); the reply is the session
+  /// after it was transcribed and sorted. A 503 means OpenAI failed and the
+  /// segment is lost: keep listening.
+  Future<LivePracticeView> sendLivePracticeAudio(String id, List<int> bytes, {required int durationMs, String fileName = 'segment.m4a'}) async =>
+      _live(await post('${_livePath(id)}/audio', body: {'audioBase64': base64Encode(bytes), 'fileName': fileName, 'durationMs': durationMs}, timeout: aiTimeout));
+
+  /// Typed input, the same as a segment (when the mic misbehaves).
+  Future<LivePracticeView> sendLivePracticeText(String id, String text) async => _live(await post('${_livePath(id)}/text', body: {'text': text.trim()}, timeout: aiTimeout));
+
+  /// Grades a question's spoken answer now (a few seconds).
+  Future<LivePracticeView> gradeLivePracticeQuestion(String id, String questionId) async =>
+      _live(await post('${_livePath(id)}/questions/${Uri.encodeComponent(questionId)}/grade', timeout: aiTimeout));
+
+  /// Ends the session; ungraded answers are graded in the background.
+  Future<LivePracticeView> endLivePractice(String id) async => _live(await post('${_livePath(id)}/end', timeout: const Duration(seconds: 60)));
+
+  Future<void> deleteLivePractice(String id) => delete(_livePath(id));
 }

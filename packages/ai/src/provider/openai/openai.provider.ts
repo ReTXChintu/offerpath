@@ -1,4 +1,4 @@
-import OpenAI from 'openai';
+import OpenAI, { toFile } from 'openai';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 
 import {
@@ -29,6 +29,17 @@ export interface OpenAIProviderOptions {
   maxRetries: number;
 }
 
+export interface TranscribeRequest {
+  audio: Buffer;
+  /** Its extension tells OpenAI the format (m4a, wav, mp3, webm). */
+  fileName: string;
+  model: string;
+  /** Words to expect (technologies, names): it helps with spelling them. */
+  prompt?: string;
+  language?: string;
+  signal?: AbortSignal;
+}
+
 /**
  * OpenAI, as the fallback when the user's desktop is offline (the user's
  * own key, saved in Settings). Claude on the desktop is always tried first.
@@ -48,6 +59,28 @@ export class OpenAIProvider implements AIProvider {
       timeout: options.timeoutMs,
       maxRetries: options.maxRetries,
     });
+  }
+
+  /**
+   * Speech to text, for live practice. Only OpenAI transcribes here, so this
+   * lives on the provider rather than on the AIProvider port.
+   */
+  async transcribe(req: TranscribeRequest): Promise<string> {
+    try {
+      const result = await this.client.audio.transcriptions.create(
+        {
+          file: await toFile(req.audio, req.fileName),
+          model: req.model,
+          response_format: 'json',
+          ...(req.prompt ? { prompt: req.prompt } : {}),
+          ...(req.language ? { language: req.language } : {}),
+        },
+        { signal: req.signal },
+      );
+      return result.text.trim();
+    } catch (error) {
+      throw new AIUnavailable('transcription', error);
+    }
   }
 
   /**

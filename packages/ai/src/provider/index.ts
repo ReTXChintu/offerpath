@@ -13,6 +13,10 @@ export {
   claudeCodeArgs,
   type ClaudeCodeProviderOptions,
 } from './claude-code/claude-code.provider.js';
-export { OpenAIProvider, type OpenAIProviderOptions } from './openai/openai.provider.js';
+export {
+  OpenAIProvider,
+  type OpenAIProviderOptions,
+  type TranscribeRequest,
+} from './openai/openai.provider.js';
 export { stripAbsent, toStrictSchema } from './schema/strict-schema.js';
 export { FakeAIProvider, type FakeResponse } from './testing/fake.provider.js';
