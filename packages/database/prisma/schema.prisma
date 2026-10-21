@@ -1639,8 +1639,8 @@ enum LivePracticeStatus {
 }
 
 /// Two people practising interviews face to face while the phone listens:
-/// questions get AI answers, spoken answers get graded. See
-/// docs/live-practice.md. OpenAI only, on the user's own key.
+/// any question asked gets a direct AI answer, live, from an OpenAI Realtime
+/// session on the user's own key. See docs/live-practice.md.
 model LivePracticeSession {
   id           String             @id @default(cuid())
   userId       String
@@ -1657,47 +1657,24 @@ model LivePracticeSession {
   endedAt      DateTime?
   updatedAt    DateTime           @updatedAt
 
-  lines     LivePracticeLine[]
-  questions LivePracticeQuestion[]
+  exchanges LivePracticeExchange[]
 
   @@index([userId, createdAt])
   @@map("live_practice_sessions")
 }
 
-/// What was said, one transcribed stretch of speech per line.
-model LivePracticeLine {
-  id         String              @id @default(cuid())
-  sessionId  String
-  session    LivePracticeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  order      Int
-  text       String
-  /// QUESTION, ANSWER or OTHER.
-  kind       String
-  questionId String?
-  durationMs Int?
-  createdAt  DateTime            @default(now())
-
-  @@unique([sessionId, order])
-  @@map("live_practice_lines")
-}
-
-model LivePracticeQuestion {
+/// A question heard and the answer given, saved by the phone.
+model LivePracticeExchange {
   id        String              @id @default(cuid())
   sessionId String
   session   LivePracticeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   order     Int
-  text      String
-  /// "me" or "neutral": what the AI answer was written for.
+  question  String
+  answer    String
+  /// "me" or "neutral": what the answer was written for.
   answerFor String
-  /// { summary, points[], detail } from the live practice agent.
-  aiAnswer  Json
-  /// The spoken answer graded against the AI answer's points.
-  score     Int?
-  /// { covered[], missed[], feedback }.
-  feedback  Json?
-  gradedAt  DateTime?
   createdAt DateTime            @default(now())
 
   @@unique([sessionId, order])
-  @@map("live_practice_questions")
+  @@map("live_practice_exchanges")
 }

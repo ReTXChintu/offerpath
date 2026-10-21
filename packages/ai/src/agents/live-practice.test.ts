@@ -1,52 +1,46 @@
 import { describe, expect, it } from 'vitest';
 
-import { livePracticeAgent, liveTurnSchema, type LiveTurnInput } from './live-practice.agent.js';
+import {
+  LIVE_SKIP,
+  liveAnswererInstructions,
+  type LiveAnswererInput,
+} from './live-practice.agent.js';
 
-const input: LiveTurnInput = {
+const input: LiveAnswererInput = {
   company: 'Acme',
   role: 'Backend engineer',
   jobDescription: null,
   technologies: ['PostgreSQL'],
   resume: 'Built a payments ledger on PostgreSQL.',
-  recent: [{ kind: 'OTHER', text: 'Okay, my turn to ask.' }],
-  currentQuestion: null,
-  latest: 'how does mvcc work in postgres',
+  earlier: [],
 };
 
-const text = (i: LiveTurnInput) =>
-  livePracticeAgent
-    .buildPrompt(i)
-    .messages.map((m) => m.content)
-    .join('\n');
+describe('live practice instructions', () => {
+  it('answers directly, never with advice about what to say', () => {
+    const text = liveAnswererInstructions(input);
+    expect(text).toContain('Answer the question itself, directly');
+    expect(text).toContain('Never give advice about what to say');
+    expect(text).toContain('there are no turns');
+  });
 
-describe('live practice agent', () => {
-  it('answers from the CV, or says there is none', () => {
-    expect(text(input)).toContain('Answer as this candidate, from their CV');
-    expect(text(input)).toContain('payments ledger');
-    const neutral = text({ ...input, resume: null });
+  it('answers as the candidate from the CV, or neutrally without one', () => {
+    expect(liveAnswererInstructions(input)).toContain('payments ledger');
+    expect(liveAnswererInstructions(input)).toContain('first person');
+    const neutral = liveAnswererInstructions({ ...input, resume: null });
     expect(neutral).not.toContain('payments ledger');
-    expect(neutral).toContain('No CV');
+    expect(neutral).toContain('Answer neutrally');
   });
 
-  it('runs on the fast model: the answer must be on screen in seconds', () => {
-    expect(livePracticeAgent.buildPrompt(input).model).toBe('fast');
+  it('skips what is not a question with a marker the phone drops', () => {
+    expect(liveAnswererInstructions(input)).toContain(`reply with exactly ${LIVE_SKIP}`);
   });
 
-  it('tidies long output instead of failing it', () => {
-    const parsed = liveTurnSchema.parse({
-      kind: 'QUESTION',
-      question: 'How does MVCC work in PostgreSQL?',
-      answer: {
-        summary: 's'.repeat(800),
-        points: Array.from({ length: 9 }, (_, i) => `Point ${i}`),
-        detail: '',
-      },
+  it('carries earlier answers across a reconnect', () => {
+    const text = liveAnswererInstructions({
+      ...input,
+      earlier: [{ question: 'What is MVCC?', answer: 'Each transaction sees a snapshot.' }],
     });
-    expect(parsed.answer!.summary).toHaveLength(500);
-    expect(parsed.answer!.points).toHaveLength(6);
-    expect(parsed.answer!.detail).toBe('');
-    expect(liveTurnSchema.parse({ kind: 'OTHER', question: null, answer: null }).kind).toBe(
-      'OTHER',
-    );
+    expect(text).toContain('Q: What is MVCC?');
+    expect(text).toContain('A: Each transaction sees a snapshot.');
   });
 });

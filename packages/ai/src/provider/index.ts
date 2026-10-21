@@ -16,7 +16,8 @@ export {
 export {
   OpenAIProvider,
   type OpenAIProviderOptions,
-  type TranscribeRequest,
+  type RealtimeSecret,
+  type RealtimeSecretRequest,
 } from './openai/openai.provider.js';
 export { stripAbsent, toStrictSchema } from './schema/strict-schema.js';
 export { FakeAIProvider, type FakeResponse } from './testing/fake.provider.js';

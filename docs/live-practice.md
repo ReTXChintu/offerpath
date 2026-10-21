@@ -1,101 +1,96 @@
 # Live practice
 
-Two people practise interviews together, face to face, with the phone on the
-table. They take turns asking each other questions. The phone listens: what
-is said is transcribed. When someone asks a question, an AI answer appears
-for comparison. When the spoken answer is over, it is scored against the AI's
-answer. It's for practice with a partner, never for a real interview.
+Two people practise interviews face to face with the phone on the table. The
+phone listens continuously. When anyone asks an interview question, a direct
+answer appears on screen within a second or two and fills in as it's written.
+The answer is the answer itself, in the first person, as the user (from their
+CV) or neutrally; it isn't advice about what to say. Each question and answer
+is saved to review later. It's for practice with a partner, never for a real
+interview.
 
-**OpenAI only** (user decision, 2026-10-21): live practice needs speed, so it
-runs on the user's own OpenAI key (Settings → AI), never Claude. Without a
-saved key it doesn't start. Transcription uses `OPENAI_TRANSCRIBE_MODEL`
-(default `gpt-4o-mini-transcribe`). Analysis and grading use the key's fast
-model.
+**OpenAI Realtime only** (user decision, 2026-10-21): the user's own OpenAI
+key (Settings → AI), never Claude. The model is `OPENAI_REALTIME_MODEL`
+(default `gpt-realtime`). It transcribes for the caption with
+`OPENAI_TRANSCRIBE_MODEL` (default `gpt-4o-mini-transcribe`).
 
-## How the phone talks to the API
+## How it works
 
-The phone records the microphone and cuts the audio into segments at
-pauses, using a simple voice-activity check on the input level. A segment
-ends after about 1.2 s of silence, and none runs longer than 30 s. Each
-segment goes to `POST /live-practice/:id/audio`, one at a time and in order.
-The response is the whole updated session. The API transcribes the segment,
-then classifies what was said:
+1. The phone asks the API for a realtime pass (`POST /live-practice/:id/realtime`).
+   - The API creates an OpenAI Realtime client secret with the user's key. The secret is short-lived, so the key itself never leaves the server.
+   - The session config is fixed by the API: the model, the instructions (the CV, JD and technologies, and how to answer), text-only output, input transcription, and server voice-activity detection with `create_response: true` and `interrupt_response: false`.
+2. The phone opens `wss://api.openai.com/v1/realtime?model=<model>` with `Authorization: Bearer <clientSecret>`. It streams the microphone as `input_audio_buffer.append` events: PCM16, 24 kHz, mono, base64, every ~100 ms.
+3. OpenAI cuts the speech at pauses and answers every turn.
+   - Its instructions say to reply with exactly `-` when what was said isn't a question. The phone drops those replies.
+   - A long, unbroken stretch of speech is still a single turn.
+4. When an answer finishes, the phone saves it with `POST /live-practice/:id/exchanges`. The question is the transcript of the turn that triggered it.
+5. OpenAI ends a realtime connection after about an hour, and a client secret only lets the phone connect for 10 minutes. On a dropped connection, the phone asks for a new pass and reconnects. The new instructions include the last saved exchanges, so follow-up questions keep their context.
 
-- **QUESTION**: a new question card, with the AI answer.
-- **ANSWER**: part of the spoken answer to the latest question.
-- **OTHER**: small talk, "okay", or noise. It goes in the transcript only.
+Events the phone handles (GA names first, beta names after; handle both):
 
-When a new question arrives, the previous question's spoken answer is graded
-in the background. "Grade now" and ending the session grade it as well.
+| Event | Use |
+| --- | --- |
+| `input_audio_buffer.speech_started` / `speech_stopped` | "Listening…" / "Thinking…" states |
+| `input_audio_buffer.committed` (`item_id`) | a turn ended; the next response belongs to it |
+| `conversation.item.input_audio_transcription.delta` / `.completed` (`item_id`, `delta` / `transcript`) | the live caption and the question text |
+| `response.created` | an answer started |
+| `response.output_text.delta` / `response.text.delta` (`delta`) | the answer, as it arrives |
+| `response.output_text.done` / `response.text.done`, `response.done` | the answer is finished |
+| `error` (`error.message`) | shown as it is |
+
+A typed question goes as `conversation.item.create`, an item with
+`role: 'user'` and `content: [{ type: 'input_text', text }]`, followed by
+`response.create`.
+
+## API
 
 All routes are under `/api/v1`, need the bearer token, and answer problem
 details on error.
 
 ```ts
-type AnswerFor = 'me' | 'neutral'; // me: from the prep's CV, else the synced profile; neutral: no CV
-type LineKind = 'QUESTION' | 'ANSWER' | 'OTHER';
+type AnswerFor = 'me' | 'neutral'; // me: the prep's CV, else the synced profile; neutral: no CV
 
-interface LiveLine {
+interface LiveExchange {
   id: string;
-  order: number;
-  text: string;
-  kind: LineKind;
-  questionId: string | null; // QUESTION lines and the ANSWER lines that belong to it
-  createdAt: string;
-}
-
-interface LiveQuestion {
-  id: string;
-  order: number;              // 0-based
-  text: string;               // the question, tidied up
-  answerFor: AnswerFor;       // what the AI answer was written for
-  aiAnswer: {
-    summary: string;          // one or two sentences
-    points: string[];         // 1-6 talking points
-    detail: string;           // a fuller answer, markdown ('' when there is nothing to add)
-  };
-  spokenAnswer: string | null; // the ANSWER lines joined; null before anyone answered
-  score: number | null;       // 0-10 once graded
-  feedback: { covered: string[]; missed: string[]; feedback: string } | null;
-  grading: boolean;           // a grade is being written now
-  gradedAt: string | null;
+  order: number;     // 0-based
+  question: string;
+  answer: string;
+  answerFor: AnswerFor;
   createdAt: string;
 }
 
 interface LivePracticeView {
   id: string;
   prepId: string | null;
-  title: string;              // the prep's role/company, the technologies, or "Live practice"
+  title: string;
   technologies: string[];
   answerFor: AnswerFor;
   status: 'ACTIVE' | 'ENDED';
-  lines: LiveLine[];
-  questions: LiveQuestion[];
-  stats: { questions: number; graded: number; averageScore: number | null };
+  exchanges: LiveExchange[];
   createdAt: string;
   endedAt: string | null;
 }
 
 interface LivePracticeSummary {
   id: string; prepId: string | null; title: string; status: 'ACTIVE' | 'ENDED';
-  stats: LivePracticeView['stats']; createdAt: string; endedAt: string | null;
+  exchanges: number; createdAt: string; endedAt: string | null;
+}
+
+interface RealtimePass {
+  clientSecret: string;  // ek_..., for the WebSocket's Authorization header
+  expiresAt: string;     // ISO; the secret must be used before then
+  model: string;
+  url: string;           // wss://api.openai.com/v1/realtime?model=<model>
 }
 ```
 
 | Route | Body | Returns |
 | --- | --- | --- |
-| `GET /live-practice/ready` | | `{ ready: boolean, reason: string \| null }`: false without a saved OpenAI key (or when the server can't decrypt keys). |
+| `GET /live-practice/ready` | | `{ ready: boolean, reason: string \| null }`: false without a saved OpenAI key. |
 | `GET /live-practice` | | `{ sessions: LivePracticeSummary[] }`, newest first |
-| `POST /live-practice` | `{ prepId?: string, technologies?: string[], title?: string, answerFor?: AnswerFor }` (default `me`) | `LivePracticeView` (201). 400 when there's no OpenAI key. |
+| `POST /live-practice` | `{ prepId?, technologies?, title?, answerFor? }` (default `me`) | `LivePracticeView` (201). 400 without an OpenAI key. |
 | `GET /live-practice/:id` | | `LivePracticeView` |
-| `PATCH /live-practice/:id` | `{ answerFor?, title? }` | `LivePracticeView`. `answerFor` affects questions asked from now on. |
-| `POST /live-practice/:id/audio` | `{ audioBase64: string, fileName: string, durationMs: number }` (m4a/aac, wav, mp3 or webm; up to 4 MB) | `LivePracticeView` after the segment. A segment shorter than 400 ms, or one with no words in it, adds nothing. 503 `aiUnavailable` when OpenAI fails (the segment is lost; keep listening). |
-| `POST /live-practice/:id/text` | `{ text: string }` (≤ 4000) | The same as audio, for typed input. |
-| `POST /live-practice/:id/questions/:questionId/grade` | | `LivePracticeView`, with that question graded (synchronous, a few seconds). |
-| `POST /live-practice/:id/end` | | `LivePracticeView` with status `ENDED`. Ungraded answered questions are graded in the background; poll `GET` while any is `grading`. |
+| `PATCH /live-practice/:id` | `{ answerFor?, title? }` | `LivePracticeView`. A new `answerFor` needs a new pass and a reconnect. |
+| `POST /live-practice/:id/realtime` | | `RealtimePass`. 409 when the session has ended. 503 `aiUnavailable` with OpenAI's own message when it refuses. |
+| `POST /live-practice/:id/exchanges` | `{ question: string (≤ 2000), answer: string (≤ 8000) }` | `LiveExchange` (201). 409 when the session has ended. |
+| `POST /live-practice/:id/end` | | `LivePracticeView` with status `ENDED` |
 | `DELETE /live-practice/:id` | | 204 |
-
-An `ENDED` session refuses audio and text with 409.
-
-Whether answers show at once or only after the spoken answer is a setting on
-the phone, not on the server.

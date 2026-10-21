@@ -1,6 +1,5 @@
 import { type INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { FakeAIProvider, type FakeResponse } from '@offerpath/ai';
 import { PrismaClient } from '@offerpath/database';
 import request from 'supertest';
 
@@ -9,9 +8,10 @@ import { ProblemDetailsFilter } from '../src/common/filters/problem-details.filt
 import { AiFallbackService } from '../src/modules/settings/application/ai-fallback.service.js';
 
 /**
- * Live practice (docs/live-practice.md): what the phone hears becomes a
- * transcript, questions get AI answers, spoken answers get graded. OpenAI
- * only; here a fake that also "transcribes".
+ * Live practice (docs/live-practice.md): the phone talks to an OpenAI
+ * Realtime session itself; the API hands it a short-lived pass with the
+ * session's instructions fixed, and keeps the questions and answers. OpenAI
+ * is faked: it never sees a real key here.
  */
 
 jest.setTimeout(240_000);
@@ -32,32 +32,25 @@ const user = {
 const auth = () => ({ Authorization: `Bearer ${accessToken}` });
 
 const CV = 'Jane Doe. Built a payments ledger on PostgreSQL that handles 2M rows a day.';
-const INDEX_Q = 'Can you explain how a database index works?';
-const ANSWER_1 = {
-  summary: 'A B-tree that lets lookups skip a full scan.',
-  points: ['B-tree', 'Write cost'],
-  detail: '',
-};
-const GRADE = {
-  score: 7,
-  covered: ['B-tree'],
-  missed: ['Write cost'],
-  feedback: 'Mention what every index costs on writes.',
-};
 
-const turn = (kind: string, question: string | null = null, answer: unknown = null) => ({
-  kind,
-  question,
-  answer,
-});
+interface SecretCall {
+  session: {
+    type: string;
+    model: string;
+    instructions: string;
+    output_modalities: string[];
+    audio: { input: Record<string, Record<string, unknown>> };
+  };
+  expiresInSeconds: number;
+}
 
-type LiveFake = FakeAIProvider & { transcribe: jest.Mock };
-
-/** The OpenAI provider for this test: canned analyses, grades and transcripts. */
-function useOpenAI(responses: FakeResponse[], transcripts: string[] = []): LiveFake {
-  const fake = new FakeAIProvider(responses) as LiveFake;
-  fake.transcribe = jest.fn(async () => transcripts.shift() ?? '');
-  jest.spyOn(fallback, 'providerFor').mockResolvedValue(fake as never);
+/** A user with a saved OpenAI key, whose Realtime secrets are faked. */
+function useOpenAI(fail?: Error) {
+  const createRealtimeSecret = jest.fn(async (_req: SecretCall) => {
+    if (fail) throw fail;
+    return { value: 'ek_test_secret', expiresAt: Math.floor(Date.now() / 1000) + 600 };
+  });
+  jest.spyOn(fallback, 'providerFor').mockResolvedValue({ createRealtimeSecret } as never);
   jest.spyOn(fallback, 'available', 'get').mockReturnValue(true);
   jest.spyOn(fallback, 'view').mockResolvedValue({
     configured: true,
@@ -66,23 +59,7 @@ function useOpenAI(responses: FakeResponse[], transcripts: string[] = []): LiveF
     modelReasoning: 'm',
     available: true,
   });
-  return fake;
-}
-
-const segment = (durationMs = 2_000) => ({
-  audioBase64: Buffer.from('fake aac bytes').toString('base64'),
-  fileName: 'segment.m4a',
-  durationMs,
-});
-
-async function waitFor<T>(check: () => Promise<T | undefined>, ms = 60_000): Promise<T> {
-  const until = Date.now() + ms;
-  while (Date.now() < until) {
-    const value = await check();
-    if (value !== undefined) return value;
-    await new Promise((r) => setTimeout(r, 200));
-  }
-  throw new Error('timed out');
+  return createRealtimeSecret;
 }
 
 beforeAll(async () => {
@@ -119,8 +96,8 @@ it('needs an OpenAI key', async () => {
 describe('a session for a prep', () => {
   let sessionId: string;
 
-  it('takes its title, technologies and CV from the prep', async () => {
-    useOpenAI([]);
+  it('takes its title and technologies from the prep', async () => {
+    useOpenAI();
     const prep = await prisma.interviewPrep.create({
       data: {
         userId,
@@ -132,10 +109,6 @@ describe('a session for a prep', () => {
         scheduledAt: new Date(Date.now() + 86_400_000),
         status: 'READY',
       },
-    });
-    expect((await http.get('/api/v1/live-practice/ready').set(auth())).body).toEqual({
-      ready: true,
-      reason: null,
     });
     const created = await http
       .post('/api/v1/live-practice')
@@ -149,176 +122,108 @@ describe('a session for a prep', () => {
       technologies: ['PostgreSQL', 'Node.js'],
       answerFor: 'me',
       status: 'ACTIVE',
-      lines: [],
-      questions: [],
-      stats: { questions: 0, graded: 0, averageScore: null },
+      exchanges: [],
     });
   });
 
-  it('turns a spoken question into a question card with an answer from the CV', async () => {
-    const fake = useOpenAI(
-      [{ when: /explain how a database index/, data: turn('QUESTION', INDEX_Q, ANSWER_1) }],
-      ['can you explain how a database index works'],
-    );
-    const view = (
-      await http
-        .post(`/api/v1/live-practice/${sessionId}/audio`)
-        .set(auth())
-        .send(segment())
-        .expect(200)
+  it('hands out a realtime pass whose session answers as the candidate', async () => {
+    const secret = useOpenAI();
+    const pass = (
+      await http.post(`/api/v1/live-practice/${sessionId}/realtime`).set(auth()).expect(200)
     ).body;
-    expect(view.questions).toHaveLength(1);
-    expect(view.questions[0]).toMatchObject({
-      order: 0,
-      text: INDEX_Q,
-      answerFor: 'me',
-      aiAnswer: ANSWER_1,
-      spokenAnswer: null,
-      score: null,
-      grading: false,
+    expect(pass).toMatchObject({
+      clientSecret: 'ek_test_secret',
+      model: 'gpt-realtime',
+      url: 'wss://api.openai.com/v1/realtime?model=gpt-realtime',
     });
-    expect(view.lines[0]).toMatchObject({
-      kind: 'QUESTION',
-      text: 'can you explain how a database index works',
-      questionId: view.questions[0].id,
+    expect(Date.parse(pass.expiresAt)).toBeGreaterThan(Date.now());
+
+    const { session, expiresInSeconds } = secret.mock.calls[0]![0];
+    expect(expiresInSeconds).toBe(600);
+    expect(session).toMatchObject({
+      type: 'realtime',
+      model: 'gpt-realtime',
+      output_modalities: ['text'],
     });
-
-    expect(fake.transcribe).toHaveBeenCalledWith(
-      expect.objectContaining({
-        fileName: 'segment.m4a',
-        model: 'gpt-4o-mini-transcribe',
-        prompt: expect.stringContaining('PostgreSQL, Node.js'),
-      }),
-    );
-    expect(fake.calls[0]).toMatchObject({ agent: 'live-practice' });
-    expect(fake.calls[0]!.messages).toContain(CV);
+    expect(session.audio.input.format).toEqual({ type: 'audio/pcm', rate: 24_000 });
+    expect(session.audio.input.turn_detection).toMatchObject({
+      type: 'server_vad',
+      create_response: true,
+      interrupt_response: false,
+    });
+    expect(session.audio.input.transcription).toMatchObject({
+      model: 'gpt-4o-mini-transcribe',
+      prompt: expect.stringContaining('PostgreSQL, Node.js'),
+    });
+    expect(session.instructions).toContain(CV);
+    expect(session.instructions).toContain('Answer the question itself, directly');
   });
 
-  it('ignores clicks, silence and what recognition invents from it', async () => {
-    const fake = useOpenAI([], ['Thank you.', '   ']);
-    await http
-      .post(`/api/v1/live-practice/${sessionId}/audio`)
-      .set(auth())
-      .send(segment(200))
-      .expect(200);
-    expect(fake.transcribe).not.toHaveBeenCalled();
-    await http
-      .post(`/api/v1/live-practice/${sessionId}/audio`)
-      .set(auth())
-      .send(segment())
-      .expect(200);
-    const view = (
-      await http
-        .post(`/api/v1/live-practice/${sessionId}/audio`)
-        .set(auth())
-        .send(segment())
-        .expect(200)
-    ).body;
-    expect(view.lines).toHaveLength(1);
-    expect(fake.calls).toHaveLength(0);
-  });
-
-  it('collects the spoken answer, in order, even when sent at once', async () => {
-    useOpenAI([
-      { when: /It is a B-tree/, data: turn('ANSWER') },
-      { when: /so lookups skip/, data: turn('ANSWER') },
-    ]);
-    const [first, second] = await Promise.all([
+  it('keeps the questions and answers, and carries them into the next pass', async () => {
+    useOpenAI();
+    const [a, b] = await Promise.all([
       http
-        .post(`/api/v1/live-practice/${sessionId}/text`)
+        .post(`/api/v1/live-practice/${sessionId}/exchanges`)
         .set(auth())
-        .send({ text: 'It is a B-tree' }),
+        .send({ question: 'What is MVCC?', answer: 'Each transaction reads a snapshot.' }),
       http
-        .post(`/api/v1/live-practice/${sessionId}/text`)
+        .post(`/api/v1/live-practice/${sessionId}/exchanges`)
         .set(auth())
-        .send({ text: 'so lookups skip rows' }),
+        .send({ question: 'Why did you pick PostgreSQL?', answer: 'Our ledger needed ACID.' }),
     ]);
-    expect(first.status).toBe(200);
-    expect(second.status).toBe(200);
-    const view = (await http.get(`/api/v1/live-practice/${sessionId}`).set(auth())).body;
-    expect(view.lines.map((l: { kind: string }) => l.kind)).toEqual([
-      'QUESTION',
-      'ANSWER',
-      'ANSWER',
-    ]);
-    expect(view.questions[0].spokenAnswer).toBe('It is a B-tree so lookups skip rows');
-  });
+    expect(a.status).toBe(201);
+    expect(b.status).toBe(201);
+    expect([a.body.order, b.body.order].sort()).toEqual([0, 1]);
+    expect(a.body).toMatchObject({ answerFor: 'me' });
 
-  it('grades the last answer when the next question comes, and answers neutrally on request', async () => {
     await http
       .patch(`/api/v1/live-practice/${sessionId}`)
       .set(auth())
       .send({ answerFor: 'neutral' })
       .expect(200);
-    const fake = useOpenAI([
-      { when: /Key points:/, data: GRADE },
-      {
-        when: /What is a goroutine/,
-        data: turn('QUESTION', 'What is a goroutine?', {
-          summary: 'A lightweight thread.',
-          points: ['Scheduler'],
-          detail: '',
-        }),
-      },
-    ]);
-    const view = (
-      await http
-        .post(`/api/v1/live-practice/${sessionId}/text`)
-        .set(auth())
-        .send({ text: 'What is a goroutine?' })
-        .expect(200)
-    ).body;
-    expect(view.questions).toHaveLength(2);
-    expect(view.questions[1]).toMatchObject({ answerFor: 'neutral' });
-    const analysis = fake.calls.find((c) => c.agent === 'live-practice')!;
-    expect(analysis.messages).not.toContain(CV);
-    expect(analysis.messages).toContain('No CV');
-
-    const graded = await waitFor(async () => {
-      const v = (await http.get(`/api/v1/live-practice/${sessionId}`).set(auth())).body;
-      return v.questions[0].score !== null ? v : undefined;
-    });
-    expect(graded.questions[0]).toMatchObject({
-      score: 7,
-      feedback: { covered: ['B-tree'], missed: ['Write cost'], feedback: GRADE.feedback },
-      grading: false,
-    });
-    expect(graded.stats).toEqual({ questions: 2, graded: 1, averageScore: 7 });
-    const grading = fake.calls.find((c) => c.agent === 'interview-prep-grader')!;
-    expect(grading.messages).toContain('- B-tree');
-    expect(grading.messages).toContain('It is a B-tree so lookups skip rows');
+    const secret = useOpenAI();
+    await http.post(`/api/v1/live-practice/${sessionId}/realtime`).set(auth()).expect(200);
+    const { instructions } = secret.mock.calls[0]![0].session;
+    expect(instructions).not.toContain(CV);
+    expect(instructions).toContain('Answer neutrally');
+    expect(instructions).toContain('Q: What is MVCC?');
+    expect(instructions).toContain('A: Our ledger needed ACID.');
   });
 
-  it('refuses to grade an unanswered question, and ends', async () => {
-    useOpenAI([]);
-    const view = (await http.get(`/api/v1/live-practice/${sessionId}`).set(auth())).body;
-    await http
-      .post(`/api/v1/live-practice/${sessionId}/questions/${view.questions[1].id}/grade`)
+  it("passes OpenAI's own refusal on", async () => {
+    useOpenAI(
+      Object.assign(new Error('AI provider unavailable'), {
+        cause: new Error("400 Unknown parameter: 'session.audio.input.foo'."),
+      }),
+    );
+    const refused = await http
+      .post(`/api/v1/live-practice/${sessionId}/realtime`)
       .set(auth())
-      .expect(409);
+      .expect(503);
+    expect(refused.body.detail).toContain("Unknown parameter: 'session.audio.input.foo'");
+  });
 
+  it('ends: no more passes or saves, and lists it', async () => {
+    useOpenAI();
     const ended = (
       await http.post(`/api/v1/live-practice/${sessionId}/end`).set(auth()).expect(200)
     ).body;
-    expect(ended.status).toBe('ENDED');
-    expect(ended.endedAt).toBeTruthy();
+    expect(ended).toMatchObject({ status: 'ENDED' });
+    expect(ended.exchanges).toHaveLength(2);
+    await http.post(`/api/v1/live-practice/${sessionId}/realtime`).set(auth()).expect(409);
     await http
-      .post(`/api/v1/live-practice/${sessionId}/text`)
+      .post(`/api/v1/live-practice/${sessionId}/exchanges`)
       .set(auth())
-      .send({ text: 'Hi' })
+      .send({ question: 'Q?', answer: 'A.' })
       .expect(409);
 
     const list = (await http.get('/api/v1/live-practice').set(auth()).expect(200)).body.sessions;
-    expect(list[0]).toMatchObject({
-      id: sessionId,
-      status: 'ENDED',
-      stats: { questions: 2, graded: 1, averageScore: 7 },
-    });
+    expect(list[0]).toMatchObject({ id: sessionId, status: 'ENDED', exchanges: 2 });
   });
 });
 
 it('runs without a prep, from technologies alone', async () => {
-  useOpenAI([]);
+  useOpenAI();
   const created = await http
     .post('/api/v1/live-practice')
     .set(auth())

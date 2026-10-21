@@ -1,4 +1,4 @@
-import OpenAI, { toFile } from 'openai';
+import OpenAI from 'openai';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 
 import {
@@ -29,15 +29,18 @@ export interface OpenAIProviderOptions {
   maxRetries: number;
 }
 
-export interface TranscribeRequest {
-  audio: Buffer;
-  /** Its extension tells OpenAI the format (m4a, wav, mp3, webm). */
-  fileName: string;
-  model: string;
-  /** Words to expect (technologies, names): it helps with spelling them. */
-  prompt?: string;
-  language?: string;
-  signal?: AbortSignal;
+/** A Realtime session for a client to open with a short-lived secret. */
+export interface RealtimeSecretRequest {
+  /** The session config, as OpenAI's /realtime/client_secrets takes it. */
+  session: Record<string, unknown>;
+  /** How long the secret can be used to connect. */
+  expiresInSeconds: number;
+}
+
+export interface RealtimeSecret {
+  value: string;
+  /** Unix seconds. */
+  expiresAt: number;
 }
 
 /**
@@ -62,24 +65,28 @@ export class OpenAIProvider implements AIProvider {
   }
 
   /**
-   * Speech to text, for live practice. Only OpenAI transcribes here, so this
-   * lives on the provider rather than on the AIProvider port.
+   * A short-lived client secret for an OpenAI Realtime session (live
+   * practice): the phone connects with it, so the user's key stays on the
+   * server. Only OpenAI has this, so it isn't on the AIProvider port.
    */
-  async transcribe(req: TranscribeRequest): Promise<string> {
+  async createRealtimeSecret(req: RealtimeSecretRequest): Promise<RealtimeSecret> {
     try {
-      const result = await this.client.audio.transcriptions.create(
+      const result = await this.client.post<unknown, { value?: string; expires_at?: number }>(
+        '/realtime/client_secrets',
         {
-          file: await toFile(req.audio, req.fileName),
-          model: req.model,
-          response_format: 'json',
-          ...(req.prompt ? { prompt: req.prompt } : {}),
-          ...(req.language ? { language: req.language } : {}),
+          body: {
+            expires_after: { anchor: 'created_at', seconds: req.expiresInSeconds },
+            session: req.session,
+          },
         },
-        { signal: req.signal },
       );
-      return result.text.trim();
+      if (!result.value) throw new Error('OpenAI returned no client secret');
+      return {
+        value: result.value,
+        expiresAt: result.expires_at ?? Math.floor(Date.now() / 1000) + req.expiresInSeconds,
+      };
     } catch (error) {
-      throw new AIUnavailable('transcription', error);
+      throw new AIUnavailable('live-practice', error);
     }
   }
 

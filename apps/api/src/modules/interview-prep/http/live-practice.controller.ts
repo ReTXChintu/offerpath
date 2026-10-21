@@ -21,8 +21,10 @@ import { ZodValidationPipe } from '../../../common/pipes/zod-validation.pipe.js'
 import { JwtAuthGuard } from '../../auth/infrastructure/jwt-auth.guard.js';
 import {
   LivePracticeService,
+  type LiveExchangeView,
   type LivePracticeSummary,
   type LivePracticeView,
+  type RealtimePass,
 } from '../application/live-practice.service.js';
 
 const answerFor = z.enum(['me', 'neutral']);
@@ -39,16 +41,12 @@ const updateSchema = z.object({
   title: z.string().trim().max(120).nullish(),
 });
 
-const audioSchema = z.object({
-  // 4 MB of audio is about 5.6 MB of base64.
-  audioBase64: z.string().max(5_700_000),
-  fileName: z.string().trim().min(1).max(100),
-  durationMs: z.number().int().min(0).max(120_000),
+const exchangeSchema = z.object({
+  question: z.string().trim().min(1).max(2_000),
+  answer: z.string().trim().min(1).max(8_000),
 });
 
-const textSchema = z.object({ text: z.string().trim().min(1).max(4_000) });
-
-/** Live practice with a partner (docs/live-practice.md). OpenAI only. */
+/** Live practice with a partner (docs/live-practice.md). OpenAI Realtime only. */
 @ApiTags('interview-prep')
 @Controller('live-practice')
 @UseGuards(JwtAuthGuard)
@@ -91,42 +89,26 @@ export class LivePracticeController {
     return this.live.update(user.userId, id, body);
   }
 
-  @Post(':id/audio')
+  @Post(':id/realtime')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'A segment of speech: transcribed, classified, answered' })
-  audio(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('id') id: string,
-    @Body(new ZodValidationPipe(audioSchema)) body: z.infer<typeof audioSchema>,
-  ): Promise<LivePracticeView> {
-    return this.live.audio(user.userId, id, body);
+  @ApiOperation({ summary: 'A short-lived pass for the phone to open the OpenAI Realtime session' })
+  realtime(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<RealtimePass> {
+    return this.live.realtime(user.userId, id);
   }
 
-  @Post(':id/text')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Typed instead of spoken: classified and answered like speech' })
-  text(
+  @Post(':id/exchanges')
+  @ApiOperation({ summary: 'Save a question the phone heard and the answer it got' })
+  addExchange(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
-    @Body(new ZodValidationPipe(textSchema)) body: z.infer<typeof textSchema>,
-  ): Promise<LivePracticeView> {
-    return this.live.text(user.userId, id, body.text);
-  }
-
-  @Post(':id/questions/:questionId/grade')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: "Grade a question's spoken answer now" })
-  grade(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('id') id: string,
-    @Param('questionId') questionId: string,
-  ): Promise<LivePracticeView> {
-    return this.live.grade(user.userId, id, questionId);
+    @Body(new ZodValidationPipe(exchangeSchema)) body: z.infer<typeof exchangeSchema>,
+  ): Promise<LiveExchangeView> {
+    return this.live.addExchange(user.userId, id, body);
   }
 
   @Post(':id/end')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'End the session; ungraded answers are graded in the background' })
+  @ApiOperation({ summary: 'End the session' })
   end(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<LivePracticeView> {
     return this.live.end(user.userId, id);
   }

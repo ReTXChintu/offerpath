@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:offerpath_mobile/models/live_practice.dart';
 import 'package:offerpath_mobile/services/api_client.dart';
@@ -33,12 +31,13 @@ void main() {
         FakeReply.ok({
           'sessions': [
             liveSummaryJson(),
-            liveSummaryJson(id: 's2', status: 'ACTIVE'),
+            liveSummaryJson(id: 's2', status: 'ACTIVE', exchanges: 0),
           ],
         }),
       );
     final sessions = await fake.client().listLivePractice();
     expect(sessions.map((s) => s.id), ['s1', 's2']);
+    expect(sessions.first.exchanges, 3);
     expect(sessions.last.status, LiveStatus.active);
   });
 
@@ -118,71 +117,63 @@ void main() {
     ]);
   });
 
-  test(
-    'audio goes as base64 with its name and length, and waits long',
-    () async {
-      final fake = FakeApi()
-        ..on('POST', '$base/s1/audio', FakeReply.ok(liveViewJson()));
-      await fake.client().sendLivePracticeAudio('s1', [
-        1,
-        2,
-        3,
-        4,
-      ], durationMs: 2400);
-      final request = fake.requests.single;
-      expect(request.body, {
-        'audioBase64': base64Encode([1, 2, 3, 4]),
-        'fileName': 'segment.m4a',
-        'durationMs': 2400,
-      });
-      expect(request.receiveTimeout, ApiClient.aiTimeout);
-    },
-  );
-
-  test('text and grade', () async {
+  test('a realtime pass is a POST to /realtime', () async {
     final fake = FakeApi()
-      ..on('POST', '$base/s1/text', FakeReply.ok(liveViewJson()))
-      ..on(
-        'POST',
-        '$base/s1/questions/lq1/grade',
-        FakeReply.ok(
-          liveViewJson(
-            questions: [liveQuestionJson(spokenAnswer: 'x', score: 8)],
-          ),
-        ),
-      );
-    final api = fake.client();
-    await api.sendLivePracticeText('s1', '  What is a closure?  ');
-    expect(fake.requests.single.body, {'text': 'What is a closure?'});
-    final graded = await api.gradeLivePracticeQuestion('s1', 'lq1');
-    expect(graded.questions.single.score, 8);
-    expect(fake.requests.last.path, '$base/s1/questions/lq1/grade');
+      ..on('POST', '$base/s1/realtime', FakeReply.ok(realtimePassJson()));
+    final pass = await fake.client().livePracticeRealtime('s1');
+    expect(pass.clientSecret, 'ek_test1');
+    expect(pass.url, startsWith('wss://api.openai.com/v1/realtime'));
+    expect(fake.requests.single.method, 'POST');
+    expect(fake.requests.single.path, '$base/s1/realtime');
   });
 
-  test(
-    'a 503 on audio is an ApiException the screen words as OpenAI',
-    () async {
-      final fake = FakeApi()
-        ..on(
-          'POST',
-          '$base/s1/audio',
-          FakeReply.problem(
-            503,
-            'ai-unavailable',
-            'AI unavailable',
-            detail: 'OpenAI is not answering right now.',
-          ),
-        );
-      await expectLater(
-        fake.client().sendLivePracticeAudio('s1', [1], durationMs: 1500),
-        throwsA(
-          isA<ApiException>().having(
-            liveErrorMessage,
-            'message',
-            'OpenAI is not answering right now.',
-          ),
+  test('OpenAI refusing the pass is a 503 with its own message', () async {
+    final fake = FakeApi()
+      ..on(
+        'POST',
+        '$base/s1/realtime',
+        FakeReply.problem(
+          503,
+          'ai-unavailable',
+          'AI unavailable',
+          detail: 'Incorrect API key provided: sk-abc***.',
         ),
       );
-    },
-  );
+    await expectLater(
+      fake.client().livePracticeRealtime('s1'),
+      throwsA(
+        isA<ApiException>().having(
+          liveErrorMessage,
+          'message',
+          'Incorrect API key provided: sk-abc***.',
+        ),
+      ),
+    );
+  });
+
+  test('an exchange is saved with its question and answer, trimmed and cut to the limits', () async {
+    final fake = FakeApi()
+      ..on('POST', '$base/s1/exchanges', FakeReply(201, liveExchangeJson()));
+    final api = fake.client();
+    final saved = await api.saveLivePracticeExchange(
+      's1',
+      question: '  What is a closure?  ',
+      answer: ' A function with its scope. ',
+    );
+    expect(saved.id, 'x1');
+    expect(fake.requests.single.path, '$base/s1/exchanges');
+    expect(fake.requests.single.body, {
+      'question': 'What is a closure?',
+      'answer': 'A function with its scope.',
+    });
+
+    await api.saveLivePracticeExchange(
+      's1',
+      question: 'q' * 2500,
+      answer: 'a' * 9000,
+    );
+    final body = fake.requests.last.body as Map;
+    expect((body['question'] as String).length, 2000);
+    expect((body['answer'] as String).length, 8000);
+  });
 }

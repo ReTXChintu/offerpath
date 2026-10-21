@@ -1,59 +1,25 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 
-import {
-  describeAIFailure,
-  livePracticeAgent,
-  prepAnswerGraderAgent,
-  type LiveAnswerOutput,
-  type LiveLineKind,
-  type OpenAIProvider,
-} from '@offerpath/ai';
+import { describeAIFailure, liveAnswererInstructions } from '@offerpath/ai';
 import type { AppConfig } from '@offerpath/config';
-import type {
-  InterviewPrep,
-  LivePracticeLine,
-  LivePracticeQuestion,
-  LivePracticeSession,
-  Prisma,
-} from '@offerpath/database';
+import type { InterviewPrep, LivePracticeExchange, LivePracticeSession } from '@offerpath/database';
 
 import { Problems } from '../../../common/http/problem-details.js';
 import { APP_CONFIG } from '../../../infrastructure/config/config.module.js';
 import { PrismaService } from '../../../infrastructure/prisma/prisma.service.js';
-import { RecordingAIProvider } from '../../ai/infrastructure/recording-ai.provider.js';
 import { AiFallbackService } from '../../settings/application/ai-fallback.service.js';
 
 import { CvService } from './cv.service.js';
 
 export type AnswerFor = 'me' | 'neutral';
 
-export interface LiveLineView {
+export interface LiveExchangeView {
   id: string;
   order: number;
-  text: string;
-  kind: LiveLineKind;
-  questionId: string | null;
-  createdAt: string;
-}
-
-export interface LiveQuestionView {
-  id: string;
-  order: number;
-  text: string;
+  question: string;
+  answer: string;
   answerFor: AnswerFor;
-  aiAnswer: LiveAnswerOutput;
-  spokenAnswer: string | null;
-  score: number | null;
-  feedback: { covered: string[]; missed: string[]; feedback: string } | null;
-  grading: boolean;
-  gradedAt: string | null;
   createdAt: string;
-}
-
-export interface LiveStats {
-  questions: number;
-  graded: number;
-  averageScore: number | null;
 }
 
 export interface LivePracticeView {
@@ -63,9 +29,7 @@ export interface LivePracticeView {
   technologies: string[];
   answerFor: AnswerFor;
   status: LivePracticeSession['status'];
-  lines: LiveLineView[];
-  questions: LiveQuestionView[];
-  stats: LiveStats;
+  exchanges: LiveExchangeView[];
   createdAt: string;
   endedAt: string | null;
 }
@@ -75,7 +39,7 @@ export interface LivePracticeSummary {
   prepId: string | null;
   title: string;
   status: LivePracticeSession['status'];
-  stats: LiveStats;
+  exchanges: number;
   createdAt: string;
   endedAt: string | null;
 }
@@ -87,53 +51,34 @@ export interface LivePracticeInput {
   answerFor?: AnswerFor;
 }
 
-export interface AudioSegment {
-  audioBase64: string;
-  fileName: string;
-  durationMs: number;
+export interface RealtimePass {
+  clientSecret: string;
+  expiresAt: string;
+  model: string;
+  url: string;
 }
 
-/** The largest audio segment accepted, before base64 (30 s of AAC is far less). */
-export const MAX_SEGMENT_BYTES = 4 * 1024 * 1024;
-/** Shorter than this is a click or a breath, not speech. */
-export const MIN_SEGMENT_MS = 400;
-const AUDIO_EXTENSIONS = new Set([
-  'm4a',
-  'aac',
-  'mp4',
-  'wav',
-  'mp3',
-  'mpeg',
-  'mpga',
-  'webm',
-  'ogg',
-]);
-/** What speech recognition tends to invent from silence. */
-const PHANTOMS =
-  /^(thank you( (so much|very much))?|thanks( for watching)?|you|bye|(please )?subscribe[\w\s]*)[.!]*$/i;
+/** How long the phone has to connect with a pass. */
+const PASS_SECONDS = 600;
+/** Earlier exchanges carried into a reconnected session, for follow-ups. */
+const CARRIED_EXCHANGES = 6;
 
 type Full = LivePracticeSession & {
-  lines: LivePracticeLine[];
-  questions: LivePracticeQuestion[];
+  exchanges: LivePracticeExchange[];
   prep: InterviewPrep | null;
 };
 
 /**
- * Live practice (docs/live-practice.md): the phone sends what it hears in
- * segments; each is transcribed, classified (a new question, part of an
- * answer, or neither), and a question gets an AI answer to compare with.
- * Spoken answers are graded against that answer's points.
+ * Live practice (docs/live-practice.md): the phone talks to an OpenAI
+ * Realtime session directly, for speed; this service hands it a short-lived
+ * pass for that session (so the user's key stays here), fixes the session's
+ * instructions (the CV, the JD, how to answer), and keeps the questions and
+ * answers the phone saves.
  *
- * OpenAI only, on the user's own key (user decision, 2026-10-21): the answer
- * must be on screen seconds after the question. Segments of one session are
- * handled one at a time, in arrival order, so the transcript stays in order.
+ * OpenAI only, on the user's own key (user decision, 2026-10-21).
  */
 @Injectable()
 export class LivePracticeService {
-  private readonly logger = new Logger(LivePracticeService.name);
-  private readonly queues = new Map<string, Promise<unknown>>();
-  private readonly grading = new Set<string>();
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly fallback: AiFallbackService,
@@ -192,21 +137,21 @@ export class LivePracticeService {
     const sessions = await this.prisma.livePracticeSession.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
-      include: { questions: { select: { score: true } } },
+      include: { _count: { select: { exchanges: true } } },
     });
     return sessions.map((s) => ({
       id: s.id,
       prepId: s.prepId,
       title: s.title,
       status: s.status,
-      stats: statsOf(s.questions),
+      exchanges: s._count.exchanges,
       createdAt: s.createdAt.toISOString(),
       endedAt: s.endedAt?.toISOString() ?? null,
     }));
   }
 
   async get(userId: string, id: string): Promise<LivePracticeView> {
-    return this.toView(await this.load(userId, id));
+    return toView(await this.load(userId, id));
   }
 
   async update(
@@ -233,14 +178,6 @@ export class LivePracticeService {
         data: { status: 'ENDED', endedAt: new Date() },
       });
     }
-    // Every answered question still without a grade, one after another.
-    const waiting = session.questions.filter(
-      (q) => q.gradedAt === null && hasAnswer(session.lines, q.id),
-    );
-    for (const q of waiting) this.grading.add(q.id);
-    void (async () => {
-      for (const q of waiting) await this.gradeQuietly(userId, id, q.id);
-    })();
     return this.get(userId, id);
   }
 
@@ -249,276 +186,114 @@ export class LivePracticeService {
     if (count === 0) throw Problems.notFound('Live practice session');
   }
 
-  // -- What the phone hears -----------------------------------------------------
+  // -- The realtime session -------------------------------------------------------
 
-  async audio(userId: string, id: string, segment: AudioSegment): Promise<LivePracticeView> {
-    return this.serialize(id, async () => {
-      const session = await this.load(userId, id);
-      assertActive(session);
-      if (segment.durationMs < MIN_SEGMENT_MS) return this.toView(session);
-
-      const extension = segment.fileName.toLowerCase().split('.').pop() ?? '';
-      if (!AUDIO_EXTENSIONS.has(extension)) {
-        throw Problems.validation({ fileName: ['Send m4a, aac, wav, mp3, ogg or webm audio.'] });
-      }
-      const audio = Buffer.from(segment.audioBase64, 'base64');
-      if (audio.length === 0) return this.toView(session);
-      if (audio.length > MAX_SEGMENT_BYTES) {
-        throw Problems.validation({ audioBase64: ['A segment can be at most 4 MB.'] });
-      }
-
-      const openai = await this.openai(userId);
-      let text: string;
-      try {
-        text = await openai.transcribe({
-          audio,
-          fileName: `segment.${extension}`,
-          model: this.config.env.OPENAI_TRANSCRIBE_MODEL,
-          prompt: vocabulary(session),
-        });
-      } catch (error) {
-        throw Problems.aiUnavailable(describeAIFailure(error).slice(0, 300));
-      }
-      return this.ingest(userId, session, text, segment.durationMs, openai);
-    });
-  }
-
-  async text(userId: string, id: string, text: string): Promise<LivePracticeView> {
-    return this.serialize(id, async () => {
-      const session = await this.load(userId, id);
-      assertActive(session);
-      return this.ingest(userId, session, text, null, await this.openai(userId));
-    });
-  }
-
-  /** Grades a question's spoken answer now. */
-  async grade(userId: string, id: string, questionId: string): Promise<LivePracticeView> {
+  /** A short-lived pass for the phone to open the OpenAI Realtime session with. */
+  async realtime(userId: string, id: string): Promise<RealtimePass> {
     const session = await this.load(userId, id);
-    const question = session.questions.find((q) => q.id === questionId);
-    if (!question) throw Problems.notFound('Question');
-    if (!hasAnswer(session.lines, questionId)) {
-      throw Problems.conflict('Nobody has answered this question yet.');
-    }
-    if (this.grading.has(questionId)) {
-      throw Problems.conflict('This answer is being graded already.');
-    }
-    this.grading.add(questionId);
-    try {
-      await this.gradeQuestion(userId, session, question);
-    } finally {
-      this.grading.delete(questionId);
-    }
-    return this.get(userId, id);
-  }
-
-  // -- Internals -------------------------------------------------------------------
-
-  private async ingest(
-    userId: string,
-    session: Full,
-    raw: string,
-    durationMs: number | null,
-    openai: OpenAIProvider,
-  ): Promise<LivePracticeView> {
-    const text = raw.replace(/\s+/g, ' ').trim();
-    // Nothing said, or what recognition makes of silence.
-    if (!/[\p{L}\p{N}]/u.test(text) || PHANTOMS.test(text)) return this.toView(session);
-
-    const current = session.questions.at(-1) ?? null;
-    const resume =
-      session.answerFor === 'me'
-        ? (session.prep?.resumeText ?? (await this.cv.fromProfile(userId)))
-        : null;
-
-    let turn;
-    try {
-      turn = await livePracticeAgent.run(
-        new RecordingAIProvider(openai, this.prisma),
-        {
-          company: session.prep?.company ?? null,
-          role: session.prep?.role ?? null,
-          jobDescription: session.prep?.jobDescription ?? null,
-          technologies: session.technologies,
-          resume,
-          recent: session.lines
-            .slice(-12)
-            .map((l) => ({ kind: l.kind as LiveLineKind, text: l.text })),
-          currentQuestion: current?.text ?? null,
-          latest: text,
-        },
-        { userId },
-      );
-    } catch (error) {
-      // Keep what was said even when the analysis failed.
-      await this.addLine(session, text, 'OTHER', null, durationMs);
-      throw Problems.aiUnavailable(describeAIFailure(error).slice(0, 300));
-    }
-
-    if (turn.kind === 'QUESTION' && turn.answer) {
-      const question = await this.prisma.livePracticeQuestion.create({
-        data: {
-          sessionId: session.id,
-          order: session.questions.length,
-          text: turn.question?.trim() || text,
-          answerFor: session.answerFor,
-          aiAnswer: turn.answer as Prisma.InputJsonObject,
-        },
-      });
-      await this.addLine(session, text, 'QUESTION', question.id, durationMs);
-      // The previous question's answer is over: grade it while they go on.
-      if (current && current.gradedAt === null && hasAnswer(session.lines, current.id)) {
-        this.grading.add(current.id);
-        void this.gradeQuietly(userId, session.id, current.id);
-      }
-    } else if (turn.kind === 'ANSWER' && current) {
-      await this.addLine(session, text, 'ANSWER', current.id, durationMs);
-    } else {
-      await this.addLine(session, text, 'OTHER', null, durationMs);
-    }
-    return this.get(userId, session.id);
-  }
-
-  private async addLine(
-    session: Full,
-    text: string,
-    kind: LiveLineKind,
-    questionId: string | null,
-    durationMs: number | null,
-  ): Promise<void> {
-    await this.prisma.livePracticeLine.create({
-      data: {
-        sessionId: session.id,
-        order: (session.lines.at(-1)?.order ?? -1) + 1,
-        text,
-        kind,
-        questionId,
-        durationMs,
-      },
-    });
-  }
-
-  private async gradeQuestion(
-    userId: string,
-    session: Full,
-    question: LivePracticeQuestion,
-  ): Promise<void> {
-    const spoken = spokenAnswer(session.lines, question.id);
-    if (!spoken) return;
-    const openai = await this.openai(userId);
-    const answer = question.aiAnswer as unknown as LiveAnswerOutput;
-    let grade;
-    try {
-      grade = await prepAnswerGraderAgent.run(
-        new RecordingAIProvider(openai, this.prisma),
-        {
-          question: question.text,
-          keyPoints: answer.points,
-          answer: spoken,
-          role: session.prep?.role ?? null,
-        },
-        { userId },
-      );
-    } catch (error) {
-      throw Problems.aiUnavailable(describeAIFailure(error).slice(0, 300));
-    }
-    await this.prisma.livePracticeQuestion.update({
-      where: { id: question.id },
-      data: {
-        score: grade.score,
-        feedback: {
-          covered: grade.covered,
-          missed: grade.missed,
-          feedback: grade.feedback,
-        } as Prisma.InputJsonObject,
-        gradedAt: new Date(),
-      },
-    });
-  }
-
-  /** In the background: a failure leaves the question ungraded, to grade by hand. */
-  private async gradeQuietly(userId: string, sessionId: string, questionId: string): Promise<void> {
-    try {
-      const session = await this.load(userId, sessionId);
-      const question = session.questions.find((q) => q.id === questionId);
-      if (question && question.gradedAt === null) {
-        await this.gradeQuestion(userId, session, question);
-      }
-    } catch (error) {
-      this.logger.warn(`Live practice ${sessionId}: grading failed: ${String(error)}`);
-    } finally {
-      this.grading.delete(questionId);
-    }
-  }
-
-  private async openai(userId: string): Promise<OpenAIProvider> {
-    const provider = await this.fallback.providerFor(userId);
-    if (!provider) {
+    assertActive(session);
+    const openai = await this.fallback.providerFor(userId);
+    if (!openai) {
       throw Problems.aiUnavailable(
         'Live practice runs on your OpenAI key. Add it in Settings → AI.',
       );
     }
-    return provider;
+
+    const resume =
+      session.answerFor === 'me'
+        ? (session.prep?.resumeText ?? (await this.cv.fromProfile(userId)))
+        : null;
+    const instructions = liveAnswererInstructions({
+      company: session.prep?.company ?? null,
+      role: session.prep?.role ?? null,
+      jobDescription: session.prep?.jobDescription ?? null,
+      technologies: session.technologies,
+      resume,
+      earlier: session.exchanges
+        .slice(-CARRIED_EXCHANGES)
+        .map((e) => ({ question: e.question, answer: e.answer })),
+    });
+    const model = this.config.env.OPENAI_REALTIME_MODEL;
+
+    try {
+      const secret = await openai.createRealtimeSecret({
+        expiresInSeconds: PASS_SECONDS,
+        session: {
+          type: 'realtime',
+          model,
+          instructions,
+          output_modalities: ['text'],
+          audio: {
+            input: {
+              format: { type: 'audio/pcm', rate: 24_000 },
+              transcription: {
+                model: this.config.env.OPENAI_TRANSCRIBE_MODEL,
+                prompt: vocabulary(session),
+              },
+              // Answer when a question ends; a new question never cancels
+              // the answer still being written.
+              turn_detection: {
+                type: 'server_vad',
+                silence_duration_ms: 700,
+                create_response: true,
+                interrupt_response: false,
+              },
+            },
+          },
+        },
+      });
+      return {
+        clientSecret: secret.value,
+        expiresAt: new Date(secret.expiresAt * 1000).toISOString(),
+        model,
+        url: `wss://api.openai.com/v1/realtime?model=${encodeURIComponent(model)}`,
+      };
+    } catch (error) {
+      // OpenAI's own words: the user needs them to tell a bad key from a bad setting.
+      throw Problems.aiUnavailable(describeAIFailure(error, 500));
+    }
   }
 
-  /** One segment at a time per session, in the order they arrive. */
-  private serialize<T>(id: string, task: () => Promise<T>): Promise<T> {
-    const previous = this.queues.get(id) ?? Promise.resolve();
-    const next = previous.catch(() => undefined).then(task);
-    this.queues.set(id, next);
-    void next
-      .catch(() => undefined)
-      .finally(() => {
-        if (this.queues.get(id) === next) this.queues.delete(id);
+  /** A question the phone heard and the answer it got. */
+  async addExchange(
+    userId: string,
+    id: string,
+    input: { question: string; answer: string },
+  ): Promise<LiveExchangeView> {
+    const session = await this.load(userId, id);
+    assertActive(session);
+    // Two saves at once may pick the same order: the unique index makes the
+    // second one retry with the next.
+    for (let attempt = 0; ; attempt++) {
+      const last = await this.prisma.livePracticeExchange.findFirst({
+        where: { sessionId: id },
+        orderBy: { order: 'desc' },
+        select: { order: true },
       });
-    return next;
+      try {
+        const exchange = await this.prisma.livePracticeExchange.create({
+          data: {
+            sessionId: id,
+            order: (last?.order ?? -1) + 1,
+            question: input.question.trim(),
+            answer: input.answer.trim(),
+            answerFor: session.answerFor,
+          },
+        });
+        return toExchangeView(exchange);
+      } catch (error) {
+        if (attempt >= 4 || (error as { code?: string }).code !== 'P2002') throw error;
+      }
+    }
   }
 
   private async load(userId: string, id: string): Promise<Full> {
     const session = await this.prisma.livePracticeSession.findFirst({
       where: { id, userId },
-      include: {
-        lines: { orderBy: { order: 'asc' } },
-        questions: { orderBy: { order: 'asc' } },
-        prep: true,
-      },
+      include: { exchanges: { orderBy: { order: 'asc' } }, prep: true },
     });
     if (!session) throw Problems.notFound('Live practice session');
     return session;
-  }
-
-  private toView(session: Full): LivePracticeView {
-    return {
-      id: session.id,
-      prepId: session.prepId,
-      title: session.title,
-      technologies: session.technologies,
-      answerFor: session.answerFor as AnswerFor,
-      status: session.status,
-      lines: session.lines.map((l) => ({
-        id: l.id,
-        order: l.order,
-        text: l.text,
-        kind: l.kind as LiveLineKind,
-        questionId: l.questionId,
-        createdAt: l.createdAt.toISOString(),
-      })),
-      questions: session.questions.map((q) => ({
-        id: q.id,
-        order: q.order,
-        text: q.text,
-        answerFor: q.answerFor as AnswerFor,
-        aiAnswer: q.aiAnswer as unknown as LiveAnswerOutput,
-        spokenAnswer: spokenAnswer(session.lines, q.id),
-        score: q.score,
-        feedback: (q.feedback as LiveQuestionView['feedback']) ?? null,
-        grading: this.grading.has(q.id),
-        gradedAt: q.gradedAt?.toISOString() ?? null,
-        createdAt: q.createdAt.toISOString(),
-      })),
-      stats: statsOf(session.questions),
-      createdAt: session.createdAt.toISOString(),
-      endedAt: session.endedAt?.toISOString() ?? null,
-    };
   }
 }
 
@@ -528,31 +303,35 @@ function assertActive(session: LivePracticeSession): void {
   }
 }
 
-function hasAnswer(lines: LivePracticeLine[], questionId: string): boolean {
-  return lines.some((l) => l.kind === 'ANSWER' && l.questionId === questionId);
-}
-
-function spokenAnswer(lines: LivePracticeLine[], questionId: string): string | null {
-  const parts = lines.filter((l) => l.kind === 'ANSWER' && l.questionId === questionId);
-  return parts.length > 0 ? parts.map((l) => l.text).join(' ') : null;
-}
-
-function statsOf(questions: { score: number | null }[]): LiveStats {
-  const graded = questions.filter((q) => q.score !== null);
+function toExchangeView(e: LivePracticeExchange): LiveExchangeView {
   return {
-    questions: questions.length,
-    graded: graded.length,
-    averageScore:
-      graded.length > 0
-        ? Math.round((graded.reduce((s, q) => s + (q.score ?? 0), 0) / graded.length) * 10) / 10
-        : null,
+    id: e.id,
+    order: e.order,
+    question: e.question,
+    answer: e.answer,
+    answerFor: e.answerFor as AnswerFor,
+    createdAt: e.createdAt.toISOString(),
   };
 }
 
-/** Words to expect, so recognition spells the technologies right. */
+function toView(session: Full): LivePracticeView {
+  return {
+    id: session.id,
+    prepId: session.prepId,
+    title: session.title,
+    technologies: session.technologies,
+    answerFor: session.answerFor as AnswerFor,
+    status: session.status,
+    exchanges: session.exchanges.map(toExchangeView),
+    createdAt: session.createdAt.toISOString(),
+    endedAt: session.endedAt?.toISOString() ?? null,
+  };
+}
+
+/** Words to expect, so the captions spell the technologies right. */
 function vocabulary(session: Full): string {
   return [
-    'A job interview practice session.',
+    'A job interview practice conversation.',
     session.prep?.role ? `Role: ${session.prep.role}.` : '',
     session.technologies.length > 0 ? `Technologies: ${session.technologies.join(', ')}.` : '',
   ]

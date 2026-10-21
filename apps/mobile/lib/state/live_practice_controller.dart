@@ -1,83 +1,127 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 
-import '../learn/live/segment_recorder.dart';
-import '../learn/live/upload_queue.dart';
+import '../learn/live/realtime_client.dart';
 import '../models/live_practice.dart';
 import '../services/api_client.dart';
 
 /// What the screen says when the microphone permission is refused.
 const liveMicDeniedMessage =
     "Offerpath can't use the microphone. Allow it in your phone's settings "
-    '(Apps → Offerpath → Permissions), or type what was said below.';
+    '(Apps → Offerpath → Permissions), or type a question below.';
 
-/// One live-practice session on screen: listening (the [SegmentRecorder]
-/// cuts the audio, [LiveUploadQueue] sends it in order), typed input, the
-/// "answers for" switch, grading, ending, and checking again every
-/// [pollEvery] while a grade is being written.
+/// The connection to OpenAI Realtime.
+enum LiveConnection { offline, connecting, connected, reconnecting }
+
+/// One live-practice session on screen. Listening gets a realtime pass from
+/// the API, connects to OpenAI and streams the microphone ~100 ms at a time;
+/// [conversation] turns OpenAI's events into answer cards, and each finished
+/// card is saved as an exchange. A dropped connection is reconnected with a
+/// new pass while listening. Also: typed questions, the "answers for"
+/// switch, ending and deleting.
 class LivePracticeController extends ChangeNotifier {
   LivePracticeController({
     required this.api,
     required this.sessionId,
     LivePracticeView? initial,
-    SegmentRecorder? recorder,
-    this.pollEvery = const Duration(seconds: 3),
+    LiveMic? mic,
+    RealtimeConnector? connect,
+    this.reconnectDelays = const [
+      Duration(seconds: 1),
+      Duration(seconds: 2),
+      Duration(seconds: 4),
+    ],
+    this.saveRetryDelays = const [Duration(seconds: 1), Duration(seconds: 3)],
+    Duration transcriptWait = const Duration(seconds: 3),
   }) : view = initial,
-       recorder = recorder ?? SegmentRecorder() {
-    queue = LiveUploadQueue(onView: _applyFromUpload, onError: _onUploadError)
-      ..addListener(_notify);
-    _segmentsSub = this.recorder.segments.listen(_upload);
-    _schedulePoll();
+       mic = mic ?? PlatformLiveMic(),
+       _connector = connect ?? connectRealtimeSocket {
+    conversation = LiveConversation(
+      onChanged: _notify,
+      onFinished: (card) => unawaited(_save(card)),
+      onError: _onRealtimeError,
+      answerFor: initial?.answerFor ?? AnswerFor.me,
+      transcriptWait: transcriptWait,
+    );
   }
 
   final ApiClient api;
   final String sessionId;
-  final SegmentRecorder recorder;
-  final Duration pollEvery;
-  late final LiveUploadQueue queue;
-  StreamSubscription<RecordedSegment>? _segmentsSub;
-  Timer? _poll;
-  bool _disposed = false;
-  bool _loading = false;
+  final LiveMic mic;
+  final RealtimeConnector _connector;
 
-  /// Bumped by every reply that changes the session, so a poll that started
-  /// before one doesn't overwrite it with older data.
-  int _version = 0;
+  /// Waits between reconnect attempts (the first one is immediate).
+  final List<Duration> reconnectDelays;
+
+  /// Waits between attempts to save an exchange.
+  final List<Duration> saveRetryDelays;
+  late final LiveConversation conversation;
 
   LivePracticeView? view;
 
   /// Why the first load failed (nothing to show yet).
   Object? loadError;
 
+  LiveConnection connection = LiveConnection.offline;
+
   /// The mic is on.
   bool listening = false;
 
-  /// Asking for the permission / starting the recorder.
+  /// Asking for the permission / connecting / starting the recorder.
   bool startingMic = false;
 
   /// Why listening couldn't start (permission refused, ...).
   String? micError;
 
-  /// The last upload that failed ("Missed a segment: ...").
-  String? uploadError;
-
-  /// The last failed action, for a snack bar ([takeActionError]).
-  String? _actionError;
-
-  /// Questions this phone asked to grade and is waiting on.
-  final Set<String> gradingIds = {};
+  /// OpenAI's (or the server's) last error, word for word, until dismissed.
+  String? banner;
 
   bool changingAnswerFor = false;
   bool ending = false;
 
-  /// Typed inputs waiting or in flight.
-  int sendingText = 0;
+  /// Typed questions being sent.
+  int asking = 0;
+
+  /// The input level, 0 to 1, for a meter.
+  final ValueNotifier<double> level = ValueNotifier(0);
+
+  /// The last failed action, for a snack bar ([takeActionError]).
+  String? _actionError;
+
+  RealtimeSocket? _socket;
+  StreamSubscription<String>? _socketSub;
+  Future<bool>? _connecting;
+  bool _reconnecting = false;
+
+  /// Completes when the running reconnect is over.
+  Completer<void>? _reconnectDone;
+  StreamSubscription<Uint8List>? _micSub;
+  final BytesBuilder _pending = BytesBuilder();
+  final Set<Future<void>> _saves = {};
+  final Set<Timer> _timers = {};
+  bool _disposed = false;
+  bool _loading = false;
 
   bool get isEnded => view?.isEnded ?? false;
 
-  /// Uploads waiting or in flight.
-  int get uploading => queue.pending;
+  /// Cards to show while the session runs, newest first.
+  List<LiveCard> get cards => conversation.visibleCards.reversed.toList();
+
+  /// Saved exchanges that aren't on screen as a card already, newest first.
+  List<LiveExchange> get earlierExchanges {
+    final shown = {
+      for (final c in conversation.cards)
+        if (c.exchangeId != null) c.exchangeId,
+    };
+    return (view?.exchanges ?? const <LiveExchange>[])
+        .where((e) => !shown.contains(e.id))
+        .toList()
+        .reversed
+        .toList();
+  }
 
   void _notify() {
     if (!_disposed) notifyListeners();
@@ -87,24 +131,6 @@ class LivePracticeController extends ChangeNotifier {
     if (_disposed) return;
     view = next;
     loadError = null;
-    _version++;
-    _schedulePoll();
-    _notify();
-  }
-
-  void _applyFromUpload(LivePracticeView next) {
-    uploadError = null;
-    _apply(next);
-  }
-
-  void _onUploadError(String message, Object error) {
-    uploadError = message;
-    _notify();
-  }
-
-  void clearUploadError() {
-    if (uploadError == null) return;
-    uploadError = null;
     _notify();
   }
 
@@ -120,64 +146,188 @@ class LivePracticeController extends ChangeNotifier {
     _notify();
   }
 
+  void dismissBanner() {
+    if (banner == null) return;
+    banner = null;
+    _notify();
+  }
+
   Future<void> load() async {
     if (_loading || _disposed) return;
     _loading = true;
-    final version = _version;
     try {
-      final next = await api.getLivePractice(sessionId);
-      // A reply that changed the session came in meanwhile: it's newer.
-      if (version == _version) _apply(next);
+      _apply(await api.getLivePractice(sessionId));
     } catch (error) {
       if (view == null) loadError = error;
       _notify();
     } finally {
       _loading = false;
-      _schedulePoll();
     }
   }
 
-  /// While a grade is being written, check again (not while uploads are
-  /// running: their replies bring it).
-  void _schedulePoll() {
-    _poll?.cancel();
-    final current = view;
-    if (_disposed || current == null || !current.anyGrading) return;
-    _poll = Timer(pollEvery, () {
-      if (queue.busy) {
-        _schedulePoll();
-      } else {
-        load();
-      }
+  // -- Connection -------------------------------------------------------------
+
+  /// A pass from the API, then the socket. Throws when either fails.
+  Future<void> _open() async {
+    final pass = await api.livePracticeRealtime(sessionId);
+    if (_disposed) return;
+    final socket = await _connector(Uri.parse(pass.url), {
+      'Authorization': 'Bearer ${pass.clientSecret}',
     });
+    if (_disposed) {
+      unawaited(socket.close());
+      return;
+    }
+    _socket = socket;
+    _socketSub = socket.messages.listen(
+      conversation.handle,
+      onError: (Object _) {},
+      onDone: () => _onClosed(socket),
+    );
+    connection = LiveConnection.connected;
+    _notify();
   }
 
-  void _upload(RecordedSegment segment) {
-    unawaited(
-      queue.add(
-        () => api.sendLivePracticeAudio(
-          sessionId,
-          segment.bytes,
-          durationMs: segment.durationMs,
-        ),
-      ),
+  Future<bool> _ensureConnected() async {
+    // A reconnect is running: wait for it rather than open a second socket.
+    final reconnect = _reconnectDone;
+    if (reconnect != null) await reconnect.future;
+    if (_socket != null) return true;
+    return _connecting ??= _connectFirst().whenComplete(
+      () => _connecting = null,
     );
   }
 
-  /// Turns the mic on (asking for the permission first). Returns whether
-  /// it's listening.
+  Future<bool> _connectFirst() async {
+    connection = LiveConnection.connecting;
+    _notify();
+    try {
+      await _open();
+      return _socket != null;
+    } catch (error) {
+      _connectFailed(error);
+      return false;
+    }
+  }
+
+  void _connectFailed(Object error) {
+    connection = LiveConnection.offline;
+    banner = _connectError(error);
+    // The session ended elsewhere: show it as ended.
+    if (error is ApiException && error.status == 409) unawaited(load());
+    _notify();
+  }
+
+  static String _connectError(Object error) {
+    if (error is ApiException) return liveErrorMessage(error);
+    return "Couldn't connect to OpenAI: $error";
+  }
+
+  /// Retrying won't help: no key, ended, not found, ...
+  static bool _fatal(Object error) =>
+      error is ApiException && error.status >= 400 && error.status < 500;
+
+  /// The socket closed. Expected when this side closed it; otherwise
+  /// reconnect while listening.
+  void _onClosed(RealtimeSocket socket) {
+    if (!identical(socket, _socket) || _disposed) return;
+    _socket = null;
+    _socketSub = null;
+    if (listening) {
+      unawaited(_reconnect());
+    } else {
+      conversation.interrupt();
+      connection = LiveConnection.offline;
+      _notify();
+    }
+  }
+
+  void _closeSocket() {
+    final socket = _socket;
+    _socket = null;
+    unawaited(_socketSub?.cancel());
+    _socketSub = null;
+    if (socket != null) unawaited(socket.close());
+    connection = LiveConnection.offline;
+  }
+
+  /// A new pass and a new socket, a few times with a growing wait. The cards
+  /// stay; an answer cut off midway is kept as it was. With [always] it
+  /// reconnects even when not listening (a new "answers for").
+  Future<void> _reconnect({bool always = false}) async {
+    if (_reconnecting || _disposed) return;
+    _reconnecting = true;
+    final done = _reconnectDone = Completer<void>();
+    _closeSocket();
+    conversation.interrupt();
+    connection = LiveConnection.reconnecting;
+    _notify();
+    Object? failure;
+    for (var attempt = 0; attempt <= reconnectDelays.length; attempt++) {
+      if (attempt > 0) await _sleep(reconnectDelays[attempt - 1]);
+      if (_disposed || (!always && !listening) || isEnded) {
+        failure = null;
+        break;
+      }
+      try {
+        await _open();
+        failure = null;
+        break;
+      } catch (error) {
+        failure = error;
+        if (_fatal(error)) break;
+      }
+    }
+    _reconnecting = false;
+    _reconnectDone = null;
+    done.complete();
+    if (_disposed) return;
+    if (_socket == null) connection = LiveConnection.offline;
+    if (failure != null) {
+      _connectFailed(failure);
+      await pauseListening();
+    }
+    _notify();
+  }
+
+  void _send(Map<String, Object?> event) {
+    _socket?.send(jsonEncode(event));
+  }
+
+  void _onRealtimeError(String message, String? code) {
+    final expired =
+        code == 'session_expired' ||
+        message.toLowerCase().contains('maximum duration');
+    if (expired) {
+      if (listening) {
+        unawaited(_reconnect());
+      } else {
+        _closeSocket();
+        conversation.interrupt();
+      }
+      return;
+    }
+    banner = message;
+  }
+
+  // -- Microphone -------------------------------------------------------------
+
+  /// Turns the mic on: the permission, a connection, then the audio. Returns
+  /// whether it's listening.
   Future<bool> startListening() async {
     if (listening || startingMic || isEnded || _disposed) return listening;
     startingMic = true;
     micError = null;
     _notify();
     try {
-      if (!await recorder.hasPermission()) {
+      if (!await mic.hasPermission()) {
         micError = liveMicDeniedMessage;
         return false;
       }
+      if (_disposed || !await _ensureConnected() || _disposed) return false;
+      final stream = await mic.start();
       if (_disposed) return false;
-      await recorder.start();
+      _micSub = stream.listen(_onAudio, onError: (Object _) {});
       listening = true;
       return true;
     } catch (error) {
@@ -189,18 +339,126 @@ class LivePracticeController extends ChangeNotifier {
     }
   }
 
-  /// Turns the mic off; what was said so far is still sent.
+  void _onAudio(Uint8List chunk) {
+    _pending.add(chunk);
+    if (_pending.length >= realtimeChunkBytes) _flushAudio();
+  }
+
+  /// Sends what's been recorded (whole samples only; an odd byte waits).
+  void _flushAudio() {
+    var bytes = _pending.takeBytes();
+    if (bytes.length.isOdd) {
+      _pending.addByte(bytes.last);
+      bytes = Uint8List.sublistView(bytes, 0, bytes.length - 1);
+    }
+    if (bytes.isEmpty) return;
+    level.value = pcmLevel(bytes);
+    // Not connected (reconnecting): the audio is dropped.
+    if (_socket != null) _send(appendAudioEvent(bytes));
+  }
+
+  /// Turns the mic off. Speech cut off midway is still answered: a second
+  /// of silence lets OpenAI see the end of it.
   Future<void> pauseListening() async {
     if (!listening) return;
     listening = false;
     _notify();
-    await recorder.stop();
+    final sub = _micSub;
+    _micSub = null;
+    // Not awaited: no more audio is delivered either way, and the future can
+    // belong to another zone.
+    unawaited(sub?.cancel());
+    try {
+      await mic.stop();
+    } catch (_) {}
+    _flushAudio();
+    _pending.clear();
+    if (conversation.speech == LiveSpeech.hearing && _socket != null) {
+      _send(appendAudioEvent(Uint8List(realtimeSampleRate * 2)));
+    }
+    if (!_disposed) level.value = 0;
   }
 
   Future<void> toggleListening() =>
       listening ? pauseListening() : startListening();
 
-  /// Who the AI answers are written for, from the next question on.
+  // -- Questions and answers --------------------------------------------------
+
+  /// A typed question, answered like a spoken one. Returns whether it was
+  /// sent.
+  Future<bool> ask(String text) async {
+    final t = text.trim();
+    if (t.isEmpty || isEnded || _disposed) return false;
+    if (t.length > 2000) {
+      _actionError = 'Keep it under 2,000 characters.';
+      _notify();
+      return false;
+    }
+    asking++;
+    _notify();
+    try {
+      if (!await _ensureConnected() || _disposed) return false;
+      conversation.addTyped(t);
+      for (final event in typedQuestionEvents(t)) {
+        _send(event);
+      }
+      return true;
+    } finally {
+      asking--;
+      _notify();
+    }
+  }
+
+  Future<void> _save(LiveCard card) {
+    final future = _saveNow(card);
+    _saves.add(future);
+    return future.whenComplete(() => _saves.remove(future));
+  }
+
+  Future<void> _saveNow(LiveCard card) async {
+    if (card.save == LiveSaveState.saving || card.save == LiveSaveState.saved) {
+      return;
+    }
+    card
+      ..save = LiveSaveState.saving
+      ..saveError = null;
+    _notify();
+    final question = card.question.isEmpty
+        ? liveQuestionNotCaptured
+        : card.question;
+    for (var attempt = 0; ; attempt++) {
+      try {
+        final exchange = await api.saveLivePracticeExchange(
+          sessionId,
+          question: question,
+          answer: card.answer,
+        );
+        card
+          ..exchangeId = exchange.id
+          ..save = LiveSaveState.saved;
+        break;
+      } catch (error) {
+        final ended = error is ApiException && error.status == 409;
+        if (ended || _disposed || attempt >= saveRetryDelays.length) {
+          card
+            ..save = LiveSaveState.failed
+            ..saveError = liveErrorMessage(error);
+          break;
+        }
+        await _sleep(saveRetryDelays[attempt]);
+      }
+    }
+    _notify();
+  }
+
+  /// Tries a failed save again.
+  Future<void> retrySave(LiveCard card) {
+    if (card.save != LiveSaveState.failed) return Future.value();
+    return _save(card);
+  }
+
+  /// Who the answers are written for. The pass carries it, so a live
+  /// connection is replaced with a new one.
   Future<void> setAnswerFor(AnswerFor answerFor) async {
     final current = view;
     if (current == null ||
@@ -212,6 +470,8 @@ class LivePracticeController extends ChangeNotifier {
     _notify();
     try {
       _apply(await api.updateLivePractice(sessionId, answerFor: answerFor));
+      conversation.answerFor = view!.answerFor;
+      if (_socket != null || listening) unawaited(_reconnect(always: true));
     } catch (error) {
       _fail(error);
     } finally {
@@ -220,56 +480,20 @@ class LivePracticeController extends ChangeNotifier {
     }
   }
 
-  /// Grades a question's spoken answer now.
-  Future<void> grade(String questionId) async {
-    if (gradingIds.contains(questionId)) return;
-    gradingIds.add(questionId);
-    _notify();
-    try {
-      _apply(await api.gradeLivePracticeQuestion(sessionId, questionId));
-    } catch (error) {
-      _fail(error);
-    } finally {
-      gradingIds.remove(questionId);
-      _notify();
-    }
-  }
-
-  /// Whether [question] is being graded (here or on the server).
-  bool isGrading(LiveQuestion question) =>
-      question.grading || gradingIds.contains(question.id);
-
-  /// Typed input, queued behind the audio. Returns whether it was sent.
-  Future<bool> sendText(String text) async {
-    final t = text.trim();
-    if (t.isEmpty || isEnded) return false;
-    if (t.length > 4000) {
-      _actionError = 'Keep it under 4,000 characters.';
-      _notify();
-      return false;
-    }
-    sendingText++;
-    _notify();
-    try {
-      return await queue.add(
-        () => api.sendLivePracticeText(sessionId, t),
-        failurePrefix: "Couldn't send that",
-      );
-    } finally {
-      sendingText--;
-      _notify();
-    }
-  }
-
-  /// Stops listening, sends what's left, and ends the session. Grades are
-  /// then written in the background; this checks back until they're in.
+  /// Stops listening, saves the answers on screen, closes the connection and
+  /// ends the session.
   Future<bool> end() async {
     if (ending || isEnded) return false;
     ending = true;
     _notify();
     try {
       await pauseListening();
-      await queue.idle;
+      conversation.finishAll();
+      _closeSocket();
+      if (_saves.isNotEmpty) {
+        await Future.wait([..._saves])
+            .timeout(const Duration(seconds: 15), onTimeout: () => const []);
+      }
       _apply(await api.endLivePractice(sessionId));
       return true;
     } catch (error) {
@@ -284,6 +508,7 @@ class LivePracticeController extends ChangeNotifier {
   Future<bool> delete() async {
     try {
       await pauseListening();
+      _closeSocket();
       await api.deleteLivePractice(sessionId);
       return true;
     } catch (error) {
@@ -292,15 +517,32 @@ class LivePracticeController extends ChangeNotifier {
     }
   }
 
+  /// A wait that [dispose] cancels.
+  Future<void> _sleep(Duration d) {
+    final done = Completer<void>();
+    late final Timer timer;
+    timer = Timer(d, () {
+      _timers.remove(timer);
+      done.complete();
+    });
+    _timers.add(timer);
+    return done.future;
+  }
+
   @override
   void dispose() {
     _disposed = true;
-    _poll?.cancel();
-    _segmentsSub?.cancel();
-    queue.removeListener(_notify);
-    queue.dispose();
+    for (final t in _timers) {
+      t.cancel();
+    }
+    _timers.clear();
+    unawaited(_micSub?.cancel());
+    _micSub = null;
     listening = false;
-    unawaited(recorder.dispose());
+    unawaited(mic.dispose().catchError((Object _) {}));
+    _closeSocket();
+    conversation.dispose();
+    level.dispose();
     super.dispose();
   }
 }

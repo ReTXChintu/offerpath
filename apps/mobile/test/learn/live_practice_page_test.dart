@@ -2,13 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:offerpath_mobile/learn/live/live_practice_list_page.dart';
 import 'package:offerpath_mobile/learn/live/live_practice_page.dart';
-import 'package:offerpath_mobile/learn/live/segment_recorder.dart';
 import 'package:offerpath_mobile/learn/prep_detail_page.dart';
 import 'package:offerpath_mobile/state/live_practice_controller.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../support/fake_api.dart';
-import '../support/fake_mic.dart';
+import '../support/fake_realtime.dart';
 import '../support/live_fixtures.dart';
 import '../support/prep_fixtures.dart';
 
@@ -18,12 +16,13 @@ const _get = '$_base/s1';
 Finder _rich(String text) => find.textContaining(text, findRichText: true);
 
 void main() {
-  late FakeMicRecorder mic;
+  late FakeLiveMic mic;
+  late FakeConnector connector;
   late List<bool> wakelock;
 
   setUp(() {
-    SharedPreferences.setMockInitialValues({});
-    mic = FakeMicRecorder();
+    mic = FakeLiveMic();
+    connector = FakeConnector();
     wakelock = [];
   });
 
@@ -33,299 +32,179 @@ void main() {
     addTearDown(tester.view.reset);
   }
 
-  Future<void> open(
-    WidgetTester tester,
-    FakeApi fake, {
-    bool settle = true,
-  }) async {
+  /// Lets requests and socket events through without waiting for spinners
+  /// to stop.
+  Future<void> flush(WidgetTester tester) async {
+    for (var i = 0; i < 6; i++) {
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+  }
+
+  Future<void> open(WidgetTester tester, FakeApi fake) async {
     tallScreen(tester);
     await tester.pumpWidget(
       MaterialApp(
         home: LivePracticePage(
           api: fake.client(),
           sessionId: 's1',
-          recorder: SegmentRecorder(recorder: mic),
+          mic: mic,
+          connect: connector.call,
           wakelock: (on) async => wakelock.add(on),
-          pollEvery: const Duration(minutes: 5),
         ),
       ),
     );
-    if (settle) {
-      await tester.pumpAndSettle();
-    } else {
-      await tester.pump(const Duration(milliseconds: 50));
-      await tester.pump(const Duration(milliseconds: 50));
-    }
+    await tester.pumpAndSettle();
   }
 
+  FakeApi activeSession({List<Map<String, Object?>>? exchanges}) => FakeApi()
+    ..on('GET', _get, FakeReply.ok(liveViewJson(exchanges: exchanges)))
+    ..on('POST', '$_get/realtime', FakeReply.ok(realtimePassJson()))
+    ..on('POST', '$_get/exchanges', FakeReply(201, liveExchangeJson(id: 'x9')));
+
   testWidgets(
-    'a question card shows the AI answer right away, with More for the detail',
+    'listening shows the caption and a streaming answer card, then saves it; an error shows as a dismissible banner',
     (tester) async {
-      final fake = FakeApi()
-        ..on(
-          'GET',
-          _get,
-          FakeReply.ok(liveViewJson(questions: [liveQuestionJson()])),
-        );
+      final fake = activeSession();
       await open(tester, fake);
 
       expect(find.text('React, Node.js'), findsOneWidget);
       expect(find.text('Paused'), findsOneWidget);
-      expect(find.text('QUESTIONS · 1'), findsOneWidget);
-      expect(find.text('What is a closure in JavaScript?'), findsOneWidget);
-      expect(
-        find.text(
-          'A function bundled with the variables of the scope it was created in.',
-        ),
-        findsOneWidget,
-      );
-      expect(find.text('Used for private state'), findsOneWidget);
-      expect(find.text('Waiting for the answer…'), findsOneWidget);
-      expect(find.text('Grade now'), findsNothing);
-      expect(find.text('Reveal'), findsNothing);
-
-      expect(_rich('A counter made with'), findsNothing);
-      await tester.tap(find.text('More'));
-      await tester.pumpAndSettle();
-      expect(_rich('A counter made with'), findsOneWidget);
-    },
-  );
-
-  testWidgets(
-    '"After the answer" hides the AI answer behind Reveal until it was answered and moved on',
-    (tester) async {
-      SharedPreferences.setMockInitialValues({liveRevealAfterKey: true});
-      final fake = FakeApi()
-        ..on(
-          'GET',
-          _get,
-          FakeReply.ok(
-            liveViewJson(
-              questions: [
-                // Answered, and the next question was asked: unlocked.
-                liveQuestionJson(
-                  id: 'q1',
-                  order: 0,
-                  text: 'First question?',
-                  spokenAnswer: 'My first answer.',
-                ),
-                liveQuestionJson(id: 'q2', order: 1, text: 'Second question?'),
-              ],
-            ),
-          ),
-        );
-      await open(tester, fake);
-
-      // One summary visible (q1), one hidden (q2).
-      expect(
-        find.text(
-          'A function bundled with the variables of the scope it was created in.',
-        ),
-        findsOneWidget,
-      );
-      expect(find.text('Reveal'), findsOneWidget);
-      expect(
-        find.text('AI answer hidden until the question is answered'),
-        findsOneWidget,
-      );
-
-      await tester.tap(find.text('Reveal'));
-      await tester.pumpAndSettle();
-      expect(find.text('Reveal'), findsNothing);
-      expect(
-        find.text(
-          'A function bundled with the variables of the scope it was created in.',
-        ),
-        findsNWidgets(2),
-      );
-
-      // Switching back to "Right away" is remembered on the phone.
-      await tester.tap(find.text('Right away'));
-      await tester.pumpAndSettle();
-      expect(
-        (await SharedPreferences.getInstance()).getBool(liveRevealAfterKey),
-        isFalse,
-      );
-    },
-  );
-
-  testWidgets(
-    'a graded answer shows its score, what was covered and missed, and the feedback',
-    (tester) async {
-      final fake = FakeApi()
-        ..on(
-          'GET',
-          _get,
-          FakeReply.ok(
-            liveViewJson(
-              questions: [
-                liveQuestionJson(
-                  spokenAnswer: 'It keeps the outer variables.',
-                  score: 6.5,
-                ),
-              ],
-            ),
-          ),
-        );
-      await open(tester, fake);
-
-      expect(find.text('It keeps the outer variables.'), findsOneWidget);
-      expect(find.text('6.5/10'), findsOneWidget);
-      expect(find.text('GRADE · 6.5/10'), findsOneWidget);
-      expect(find.text('Clear, but give an example.'), findsOneWidget);
-      // Covered appears as an AI point and as covered; missed likewise.
-      expect(
-        find.text('Inner functions keep access to outer variables'),
-        findsNWidgets(2),
-      );
-      expect(find.byIcon(Icons.check_circle_outline), findsOneWidget);
-      expect(find.byIcon(Icons.highlight_off), findsOneWidget);
-      expect(find.text('Grade now'), findsNothing);
-    },
-  );
-
-  testWidgets('Grade now calls the route and shows the grade', (tester) async {
-    final fake = FakeApi()
-      ..on(
-        'GET',
-        _get,
-        FakeReply.ok(
-          liveViewJson(
-            questions: [liveQuestionJson(spokenAnswer: 'It keeps variables.')],
-          ),
-        ),
-      )
-      ..on(
-        'POST',
-        '$_get/questions/lq1/grade',
-        FakeReply.ok(
-          liveViewJson(
-            questions: [
-              liveQuestionJson(spokenAnswer: 'It keeps variables.', score: 8),
-            ],
-          ),
-        ),
-      );
-    await open(tester, fake);
-
-    await tester.tap(find.text('Grade now'));
-    await tester.pumpAndSettle();
-    expect(
-      fake.requests.where((r) => r.method == 'POST').single.path,
-      '$_get/questions/lq1/grade',
-    );
-    expect(find.text('8/10'), findsOneWidget);
-    expect(find.text('Grade now'), findsNothing);
-  });
-
-  testWidgets('a question being graded shows a spinner', (tester) async {
-    final fake = FakeApi()
-      ..on(
-        'GET',
-        _get,
-        FakeReply.ok(
-          liveViewJson(
-            questions: [liveQuestionJson(spokenAnswer: 'x', grading: true)],
-          ),
-        ),
-      );
-    await open(tester, fake, settle: false);
-    expect(find.text('Grading…'), findsOneWidget);
-    expect(find.text('Grade now'), findsNothing);
-  });
-
-  testWidgets('a refused microphone says so', (tester) async {
-    mic.permission = false;
-    final fake = FakeApi()..on('GET', _get, FakeReply.ok(liveViewJson()));
-    await open(tester, fake);
-    await tester.tap(find.byKey(const ValueKey('live-mic')));
-    await tester.pumpAndSettle();
-    expect(find.text(liveMicDeniedMessage), findsOneWidget);
-    expect(find.text('Paused'), findsOneWidget);
-    expect(mic.starts, 0);
-  });
-
-  testWidgets(
-    'listening keeps the screen on, uploads segments, and a failed one is a small notice',
-    (tester) async {
-      final fake = FakeApi()..on('GET', _get, FakeReply.ok(liveViewJson()));
-      var uploads = 0;
-      fake.routes['POST $_base/s1/audio'] = (_) {
-        uploads++;
-        return uploads == 1
-            ? FakeReply.problem(
-                503,
-                'ai-unavailable',
-                'AI unavailable',
-                detail: 'OpenAI timed out.',
-              )
-            : FakeReply.ok(
-                liveViewJson(
-                  questions: [
-                    liveQuestionJson(text: 'Tell me about yourself.'),
-                  ],
-                ),
-              );
-      };
-      await open(tester, fake);
+      expect(find.text('QUESTIONS · 0'), findsOneWidget);
 
       await tester.tap(find.byKey(const ValueKey('live-mic')));
-      await tester.pumpAndSettle();
+      await flush(tester);
       expect(find.text('Listening'), findsOneWidget);
-      expect(mic.starts, 1);
+      expect(connector.headers.single, {'Authorization': 'Bearer ek_test1'});
       expect(wakelock, [true]);
+      final socket = connector.last;
 
-      Future<void> speak(int speech, int silence) async {
-        for (var i = 0; i < speech + silence; i++) {
-          mic.pushLevel(i < speech ? -20 : -70);
-          // The real clock: let 100 ms pass per sample.
-          await tester.runAsync(
-            () => Future<void>.delayed(const Duration(milliseconds: 100)),
-          );
-          await tester.pump();
-        }
-      }
+      socket.emit({'type': 'input_audio_buffer.speech_started'});
+      await flush(tester);
+      expect(find.text('Listening…'), findsOneWidget);
+      socket
+        ..emit({'type': 'input_audio_buffer.speech_stopped'})
+        ..emit({'type': 'input_audio_buffer.committed', 'item_id': 'item_1'})
+        ..emit({
+          'type': 'conversation.item.input_audio_transcription.delta',
+          'item_id': 'item_1',
+          'delta': 'How do you reverse',
+        });
+      await flush(tester);
+      expect(find.text('Thinking…'), findsOneWidget);
+      expect(find.byKey(const ValueKey('live-caption')), findsOneWidget);
+      expect(find.text('How do you reverse'), findsOneWidget);
 
-      await speak(5, 13);
-      await tester.pumpAndSettle();
-      expect(find.text('Missed a segment: OpenAI timed out.'), findsOneWidget);
-      expect(find.text('Listening'), findsOneWidget);
+      socket
+        ..emit({
+          'type': 'conversation.item.input_audio_transcription.completed',
+          'item_id': 'item_1',
+          'transcript': 'How do you reverse a list in Python?',
+        })
+        ..emit({
+          'type': 'response.created',
+          'response': {'id': 'resp_1'},
+        })
+        ..emit({
+          'type': 'response.output_text.delta',
+          'response_id': 'resp_1',
+          'delta': 'I use slicing:\n\n```python\nitems[::-1]\n```',
+        });
+      await flush(tester);
+      // The question shows in the caption and on its card.
+      expect(
+        find.text('How do you reverse a list in Python?'),
+        findsNWidgets(2),
+      );
+      expect(_rich('I use slicing:'), findsOneWidget);
+      expect(_rich('items[::-1]'), findsOneWidget);
+      expect(find.text('Writing…'), findsOneWidget);
+      expect(find.text('QUESTIONS · 1'), findsOneWidget);
+      // No grading anywhere.
+      expect(find.textContaining('/10'), findsNothing);
+      expect(find.text('Reveal'), findsNothing);
 
-      await speak(5, 13);
-      await tester.pumpAndSettle();
-      expect(uploads, 2);
-      expect(find.text('Missed a segment: OpenAI timed out.'), findsNothing);
-      expect(find.text('Tell me about yourself.'), findsOneWidget);
-      final audio = fake.requests
-          .where((r) => r.path.endsWith('/audio'))
-          .toList();
-      expect((audio.last.body as Map)['fileName'], 'segment.m4a');
-      expect((audio.last.body as Map)['durationMs'], greaterThan(1500));
+      socket.emit({
+        'type': 'response.done',
+        'response': {'id': 'resp_1', 'status': 'completed'},
+      });
+      await flush(tester);
+      expect(find.text('Writing…'), findsNothing);
+      expect(
+        fake.requests.where((r) => r.path == '$_get/exchanges').single.body,
+        {
+          'question': 'How do you reverse a list in Python?',
+          'answer': 'I use slicing:\n\n```python\nitems[::-1]\n```',
+        },
+      );
+
+      socket.emit({
+        'type': 'error',
+        'error': {
+          'type': 'invalid_request_error',
+          'message': "Unknown parameter: 'session.voice'.",
+        },
+      });
+      await flush(tester);
+      expect(find.byKey(const ValueKey('live-banner')), findsOneWidget);
+      expect(find.text("Unknown parameter: 'session.voice'."), findsOneWidget);
+      await tester.tap(find.bySemanticsLabel('Dismiss'));
+      await flush(tester);
+      expect(find.text("Unknown parameter: 'session.voice'."), findsNothing);
 
       await tester.tap(find.byKey(const ValueKey('live-mic')));
-      await tester.pumpAndSettle();
+      await flush(tester);
       expect(find.text('Paused'), findsOneWidget);
       expect(mic.recording, isFalse);
       expect(wakelock, [true, false]);
     },
   );
 
+  testWidgets('a "-" reply shows no card', (tester) async {
+    final fake = activeSession();
+    await open(tester, fake);
+    await tester.tap(find.byKey(const ValueKey('live-mic')));
+    await flush(tester);
+    connector.last
+      ..emit({'type': 'input_audio_buffer.committed', 'item_id': 'item_1'})
+      ..emit({
+        'type': 'conversation.item.input_audio_transcription.completed',
+        'item_id': 'item_1',
+        'transcript': 'Okay.',
+      })
+      ..emit({
+        'type': 'response.created',
+        'response': {'id': 'resp_1'},
+      })
+      ..emit({
+        'type': 'response.output_text.delta',
+        'response_id': 'resp_1',
+        'delta': '-',
+      })
+      ..emit({
+        'type': 'response.done',
+        'response': {'id': 'resp_1', 'status': 'completed'},
+      });
+    await flush(tester);
+    expect(find.text('QUESTIONS · 0'), findsOneWidget);
+    expect(fake.requests.where((r) => r.path == '$_get/exchanges'), isEmpty);
+  });
+
+  testWidgets('a refused microphone says so', (tester) async {
+    mic.permission = false;
+    await open(tester, activeSession());
+    await tester.tap(find.byKey(const ValueKey('live-mic')));
+    await tester.pumpAndSettle();
+    expect(find.text(liveMicDeniedMessage), findsOneWidget);
+    expect(find.text('Paused'), findsOneWidget);
+    expect(mic.starts, 0);
+    expect(connector.urls, isEmpty);
+  });
+
   testWidgets(
-    'Answers for sends a PATCH; typed text is sent; End session ends it and shows the summary',
+    'Answers for sends a PATCH; a typed question is asked; End session ends it and shows the saved answers',
     (tester) async {
-      final fake = FakeApi()
-        ..on('GET', _get, FakeReply.ok(liveViewJson()))
+      final fake = activeSession(exchanges: [liveExchangeJson()])
         ..on('PATCH', _get, FakeReply.ok(liveViewJson(answerFor: 'neutral')))
-        ..on(
-          'POST',
-          '$_get/text',
-          FakeReply.ok(
-            liveViewJson(
-              answerFor: 'neutral',
-              questions: [liveQuestionJson(text: 'Typed question?')],
-            ),
-          ),
-        )
         ..on(
           'POST',
           '$_get/end',
@@ -333,18 +212,23 @@ void main() {
             liveViewJson(
               status: 'ENDED',
               answerFor: 'neutral',
-              averageScore: 7,
-              questions: [
-                liveQuestionJson(
-                  text: 'Typed question?',
-                  spokenAnswer: 'y',
-                  score: 7,
+              exchanges: [
+                liveExchangeJson(),
+                liveExchangeJson(
+                  id: 'x2',
+                  order: 1,
+                  question: 'Typed question?',
+                  answer: 'Typed answer.',
+                  answerFor: 'neutral',
                 ),
               ],
             ),
           ),
         );
       await open(tester, fake);
+      // Saved earlier in this session.
+      expect(find.text('What is a closure in JavaScript?'), findsOneWidget);
+      expect(find.text('QUESTIONS · 1'), findsOneWidget);
 
       await tester.tap(find.text('Neutral'));
       await tester.pumpAndSettle();
@@ -352,11 +236,12 @@ void main() {
       expect(fake.requests.last.body, {'answerFor': 'neutral'});
 
       await tester.enterText(find.byType(TextField), 'Typed question?');
-      await tester.tap(find.byTooltip('Send'));
-      await tester.pumpAndSettle();
-      expect(fake.requests.last.path, '$_get/text');
-      expect(fake.requests.last.body, {'text': 'Typed question?'});
-      expect(find.text('Typed question?'), findsOneWidget);
+      await tester.tap(find.byTooltip('Ask'));
+      await flush(tester);
+      expect(connector.last.sentTypes, [
+        'conversation.item.create',
+        'response.create',
+      ]);
       expect(
         tester.widget<TextField>(find.byType(TextField)).controller!.text,
         isEmpty,
@@ -367,45 +252,52 @@ void main() {
       await tester.tap(find.widgetWithText(FilledButton, 'End session'));
       await tester.pumpAndSettle();
       expect(fake.requests.last.path, '$_get/end');
+      expect(connector.last.closed, isTrue);
       expect(find.text('Session ended'), findsOneWidget);
-      expect(find.text('7/10'), findsWidgets);
+      expect(find.text('2 questions answered'), findsOneWidget);
+      expect(find.text('Typed question?'), findsOneWidget);
+      expect(_rich('Typed answer.'), findsOneWidget);
       expect(find.byType(TextField), findsNothing);
+      expect(find.byKey(const ValueKey('live-mic')), findsNothing);
     },
   );
 
-  testWidgets('the transcript sheet lists every line', (tester) async {
+  testWidgets('a past session shows its saved answers, read-only', (
+    tester,
+  ) async {
     final fake = FakeApi()
       ..on(
         'GET',
         _get,
         FakeReply.ok(
           liveViewJson(
-            lines: [
-              liveLineJson(),
-              liveLineJson(
-                id: 'l2',
+            status: 'ENDED',
+            exchanges: [
+              liveExchangeJson(),
+              liveExchangeJson(
+                id: 'x2',
                 order: 1,
-                text: 'It keeps variables.',
-                kind: 'ANSWER',
-              ),
-              liveLineJson(
-                id: 'l3',
-                order: 2,
-                text: 'Okay.',
-                kind: 'OTHER',
-                questionId: null,
+                question: 'Why React?',
+                answer: '- Components\n- Hooks',
               ),
             ],
           ),
         ),
       );
     await open(tester, fake);
-    await tester.tap(find.byTooltip('Transcript'));
-    await tester.pumpAndSettle();
-    expect(find.text('TRANSCRIPT'), findsOneWidget);
-    expect(find.text('It keeps variables.'), findsOneWidget);
-    expect(find.text('Okay.'), findsOneWidget);
-    expect(find.text('QUESTION'), findsOneWidget);
+    expect(find.text('Session ended'), findsOneWidget);
+    expect(find.text('QUESTIONS · 2'), findsOneWidget);
+    expect(find.text('Why React?'), findsOneWidget);
+    expect(_rich('Components'), findsOneWidget);
+    expect(find.byType(TextField), findsNothing);
+    expect(find.text('Answers for'), findsNothing);
+    // Newest first.
+    expect(
+      tester.getTopLeft(find.text('Why React?')).dy,
+      lessThan(
+        tester.getTopLeft(find.text('What is a closure in JavaScript?')).dy,
+      ),
+    );
   });
 
   group('entry points', () {
@@ -439,7 +331,7 @@ void main() {
         expect(find.text('React, Node.js'), findsOneWidget);
         expect(find.text('Ended'), findsOneWidget);
         expect(find.textContaining('3 questions'), findsOneWidget);
-        expect(find.text('7.5/10'), findsOneWidget);
+        expect(find.textContaining('/10'), findsNothing);
 
         await tester.tap(find.text('New live practice'));
         await tester.pumpAndSettle();

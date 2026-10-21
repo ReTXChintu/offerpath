@@ -4,7 +4,6 @@ import '../../models/live_practice.dart';
 import '../../services/api_client.dart';
 import '../../util/format.dart';
 import '../../widgets/common.dart';
-import '../prep_widgets.dart';
 import '../ui.dart';
 import 'live_practice_page.dart';
 
@@ -154,9 +153,9 @@ class _LivePracticeListPageState extends State<LivePracticeListPage> {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    'Put the phone on the table and take turns asking each other interview questions. '
-                    'It listens, picks out each question, shows an AI answer to compare with, and scores the spoken answer. '
-                    'Uses your own OpenAI key. For practice only, never for a real interview.',
+                    'Put the phone on the table and ask each other interview questions. '
+                    'It listens all the time, and whenever anyone asks a question, a direct answer shows up within seconds. '
+                    'Every question and answer is saved. Uses your own OpenAI key. For practice only, never for a real interview.',
                     style: TextStyle(
                       fontSize: 13,
                       color: tone.muted,
@@ -186,8 +185,7 @@ class _SessionTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tone = LearnTone.of(context);
-    final avg = session.stats.averageScore;
-    final n = session.stats.questions;
+    final n = session.exchanges;
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Material(
@@ -238,15 +236,6 @@ class _SessionTile extends StatelessWidget {
                     ],
                   ),
                 ),
-                if (avg != null)
-                  Text(
-                    formatPrepScore(avg),
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w800,
-                      color: prepScoreColor(context, avg),
-                    ),
-                  ),
                 Icon(Icons.chevron_right, size: 20, color: tone.muted),
               ],
             ),
@@ -258,7 +247,7 @@ class _SessionTile extends StatelessWidget {
 }
 
 /// Starts a session from the Learn tab: optional technologies and title,
-/// and who the AI answers are for. Says so up front when no OpenAI key is
+/// and who the answers are for. Says so up front when no OpenAI key is
 /// saved. Pops with the new session.
 class NewLivePracticeSheet extends StatefulWidget {
   const NewLivePracticeSheet({required this.api, super.key});
@@ -350,7 +339,7 @@ class _NewLivePracticeSheetState extends State<NewLivePracticeSheet> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Both optional: the technologies steer the AI answers, the title names the session.',
+                  'Both optional: the technologies steer the answers, the title names the session.',
                   style: TextStyle(fontSize: 12.5, color: tone.muted),
                 ),
                 if (notReady)

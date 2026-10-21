@@ -401,26 +401,31 @@ class ApiClient {
 
   Future<LivePracticeView> getLivePractice(String id) async => _live(await get(_livePath(id)));
 
-  /// [answerFor] applies to questions asked from now on.
+  /// A new [answerFor] needs a new realtime pass (and a reconnect).
   Future<LivePracticeView> updateLivePractice(String id, {AnswerFor? answerFor, String? title}) async => _live(await patch(_livePath(id), body: {
         if (answerFor != null) 'answerFor': answerForValue(answerFor),
         if (title != null && title.trim().isNotEmpty) 'title': title.trim(),
       }));
 
-  /// Sends one recorded segment (m4a, up to 4 MB); the reply is the session
-  /// after it was transcribed and sorted. A 503 means OpenAI failed and the
-  /// segment is lost: keep listening.
-  Future<LivePracticeView> sendLivePracticeAudio(String id, List<int> bytes, {required int durationMs, String fileName = 'segment.m4a'}) async =>
-      _live(await post('${_livePath(id)}/audio', body: {'audioBase64': base64Encode(bytes), 'fileName': fileName, 'durationMs': durationMs}, timeout: aiTimeout));
+  /// A short-lived OpenAI Realtime pass for this session: the phone connects
+  /// with it straight to OpenAI. 409 once the session has ended; 503 with
+  /// OpenAI's own message when it refuses.
+  Future<RealtimePass> livePracticeRealtime(String id) async {
+    final j = await post('${_livePath(id)}/realtime', timeout: const Duration(seconds: 30));
+    if (j is! Map) throw const ApiException(status: 0, type: 'bad-reply', title: 'Unexpected reply from the server.');
+    return RealtimePass.fromJson(j.cast<String, dynamic>());
+  }
 
-  /// Typed input, the same as a segment (when the mic misbehaves).
-  Future<LivePracticeView> sendLivePracticeText(String id, String text) async => _live(await post('${_livePath(id)}/text', body: {'text': text.trim()}, timeout: aiTimeout));
+  /// Saves one answered question (cut to the API's limits: 2,000 and 8,000
+  /// characters).
+  Future<LiveExchange> saveLivePracticeExchange(String id, {required String question, required String answer}) async {
+    String cut(String s, int max) => s.length > max ? s.substring(0, max) : s;
+    final j = await post('${_livePath(id)}/exchanges', body: {'question': cut(question.trim(), 2000), 'answer': cut(answer.trim(), 8000)});
+    if (j is! Map) throw const ApiException(status: 0, type: 'bad-reply', title: 'Unexpected reply from the server.');
+    return LiveExchange.fromJson(j.cast<String, dynamic>());
+  }
 
-  /// Grades a question's spoken answer now (a few seconds).
-  Future<LivePracticeView> gradeLivePracticeQuestion(String id, String questionId) async =>
-      _live(await post('${_livePath(id)}/questions/${Uri.encodeComponent(questionId)}/grade', timeout: aiTimeout));
-
-  /// Ends the session; ungraded answers are graded in the background.
+  /// Ends the session.
   Future<LivePracticeView> endLivePractice(String id) async => _live(await post('${_livePath(id)}/end', timeout: const Duration(seconds: 60)));
 
   Future<void> deleteLivePractice(String id) => delete(_livePath(id));
