@@ -3,7 +3,7 @@ description: "Offerpath on your phone: today's plan, learning on the go, and app
 publish_to: 'none'
 # X.Y.Z is the repo-wide version (`pnpm release` stamps it); +N is the build
 # number, which CI overrides with the run number.
-version: 0.3.0+4
+version: 0.4.0+5
 
 environment:
   sdk: ^3.13.2
