@@ -1,19 +1,22 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:offerpath_mobile/learn/live/realtime_client.dart';
+import 'package:offerpath_mobile/learn/live/speaker_embedder.dart';
 import 'package:offerpath_mobile/models/live_practice.dart';
 import 'package:offerpath_mobile/state/live_practice_controller.dart';
 
 import '../support/fake_api.dart';
 import '../support/fake_realtime.dart';
+import '../support/fake_voice.dart';
 import '../support/live_fixtures.dart';
 
 const _s1 = '/api/v1/live-practice/s1';
 
 /// A controller on fakes, with short waits.
 class _Rig {
-  _Rig({LivePracticeView? initial}) {
+  _Rig({LivePracticeView? initial, LiveVoice? voice}) {
     var passes = 0;
     api.routes['POST $_s1/realtime'] = (_) =>
         FakeReply.ok(realtimePassJson(secret: 'ek_${++passes}'));
@@ -35,6 +38,7 @@ class _Rig {
       initial: initial ?? LivePracticeView.fromJson(liveViewJson()),
       mic: mic,
       connect: connector.call,
+      loadVoice: voice == null ? null : () async => voice,
       reconnectDelays: const [
         Duration(milliseconds: 5),
         Duration(milliseconds: 5),
@@ -66,6 +70,18 @@ Future<void> settle() async {
     await pumpEventQueue();
   }
 }
+
+Map<String, Object?> _started(String item, int ms) => {
+  'type': 'input_audio_buffer.speech_started',
+  'item_id': item,
+  'audio_start_ms': ms,
+};
+
+Map<String, Object?> _stopped(String item, int ms) => {
+  'type': 'input_audio_buffer.speech_stopped',
+  'item_id': item,
+  'audio_end_ms': ms,
+};
 
 Map<String, Object?> _committed(String item) => {
   'type': 'input_audio_buffer.committed',
@@ -138,6 +154,21 @@ void main() {
     expect(rig.c.level.value, 0);
     // The socket stays open for typed questions.
     expect(rig.socket.closed, isFalse);
+  });
+
+  test('without a voice profile every turn is answered: response.create after its commit, with the hint', () async {
+    final rig = _Rig();
+    addTearDown(rig.c.dispose);
+    await rig.c.startListening();
+    expect(rig.c.voice, isNull);
+    expect(rig.c.showVoiceHint, isTrue);
+
+    await rig.emit(_started('item_1', 0));
+    await rig.emit(_stopped('item_1', 3000));
+    expect(rig.socket.sentTypes, isNot(contains('response.create')));
+    await rig.emit(_committed('item_1'));
+    expect(rig.socket.sentTypes.where((t) => t == 'response.create'), hasLength(1));
+    expect(rig.c.conversation.turn('item_1')!.role, LiveRole.interviewer);
   });
 
   test('a full turn yields one card and one saved exchange; the caption follows the transcript', () async {
@@ -299,7 +330,8 @@ void main() {
     rig.mic.push(List.filled(realtimeChunkBytes, 3));
     await settle();
     expect(rig.socket.sentTypes, ['input_audio_buffer.append']);
-    expect(first.sent, isEmpty);
+    // The old one only asked for its turn's answer.
+    expect(first.sentTypes, ['response.create']);
   });
 
   test(
@@ -369,34 +401,6 @@ void main() {
       'answer': 'An architectural style.',
     });
   });
-
-  test(
-    'Answers for is saved, then the connection is replaced with a new pass',
-    () async {
-      final rig = _Rig();
-      rig.api.on(
-        'PATCH',
-        _s1,
-        FakeReply.ok(liveViewJson(answerFor: 'neutral')),
-      );
-      addTearDown(rig.c.dispose);
-      await rig.c.startListening();
-
-      await rig.c.setAnswerFor(AnswerFor.neutral);
-      await settle();
-      expect(rig.api.requests.firstWhere((r) => r.method == 'PATCH').body, {
-        'answerFor': 'neutral',
-      });
-      expect(rig.c.view!.answerFor, AnswerFor.neutral);
-      expect(rig.connector.sockets, hasLength(2));
-      expect(rig.connector.sockets.first.closed, isTrue);
-      expect(rig.c.connection, LiveConnection.connected);
-
-      await rig.emit(_created('resp_1'));
-      await rig.emit(_delta('resp_1', 'Answer.'));
-      expect(rig.c.cards.single.answerFor, AnswerFor.neutral);
-    },
-  );
 
   test('a failed save is retried, then shown on the card', () async {
     final rig = _Rig();
@@ -483,5 +487,225 @@ void main() {
     expect(rig.c.banner, 'Incorrect API key provided.');
     expect(rig.c.connection, LiveConnection.offline);
     expect(rig.mic.starts, 0);
+  });
+
+  group('whose voice', () {
+    late FakeEmbedder embedder;
+    late _Rig rig;
+
+    /// Listening with the user's voiceprint; [audio] has been sent.
+    Future<void> listen(List<int> audio) async {
+      embedder = FakeEmbedder();
+      rig = _Rig(voice: fakeLiveVoice(embedder));
+      addTearDown(rig.c.dispose);
+      expect(await rig.c.startListening(), isTrue);
+      expect(rig.c.showVoiceHint, isFalse);
+      rig.mic.push(audio);
+      await settle();
+    }
+
+    int responseCreates() =>
+        rig.socket.sentTypes.where((t) => t == 'response.create').length;
+
+    test('the interviewee is captioned "You" and never answered', () async {
+      await listen(tone(3000, ownerVoice));
+      await rig.emit(_started('item_1', 200));
+      await rig.emit(_stopped('item_1', 2800));
+      await rig.emit(_committed('item_1'));
+      await rig.emit(_transcript('item_1', 'I led the payments migration.'));
+
+      // The turn's 2.6 s went to the model at 16 kHz.
+      expect(embedder.calls.single.length, 2600 * 16);
+      expect(responseCreates(), 0);
+      final line = rig.c.conversation.transcript.single;
+      expect(line.role, LiveRole.interviewee);
+      expect(line.text, 'I led the payments migration.');
+      expect(rig.c.conversation.speech, LiveSpeech.quiet);
+      expect(rig.c.cards, isEmpty);
+    });
+
+    test('the interviewer is answered once the voice check and the commit are both in (check first)', () async {
+      await listen(tone(3000, otherVoice));
+      embedder.hold = Completer<void>();
+      await rig.emit(_started('item_1', 200));
+      await rig.emit(_stopped('item_1', 2800));
+      expect(rig.c.conversation.turn('item_1')!.role, isNull);
+
+      embedder.hold!.complete();
+      await settle();
+      expect(rig.c.conversation.turn('item_1')!.role, LiveRole.interviewer);
+      // Not in the conversation yet.
+      expect(responseCreates(), 0);
+
+      await rig.emit(_committed('item_1'));
+      expect(responseCreates(), 1);
+    });
+
+    test('... and when the commit comes before the voice check is done', () async {
+      await listen(tone(3000, otherVoice));
+      embedder.hold = Completer<void>();
+      await rig.emit(_started('item_1', 200));
+      await rig.emit(_stopped('item_1', 2800));
+      await rig.emit(_committed('item_1'));
+      expect(responseCreates(), 0);
+
+      embedder.hold!.complete();
+      await settle();
+      expect(responseCreates(), 1);
+      await rig.emit(_transcript('item_1', 'Why do you want this job?'));
+      expect(rig.c.conversation.transcript.single.role, LiveRole.interviewer);
+    });
+
+    test('a turn under a second is too short to check: the interviewer', () async {
+      await listen(tone(3000, ownerVoice));
+      await rig.emit(_started('item_1', 1000));
+      await rig.emit(_stopped('item_1', 1700));
+      await rig.emit(_committed('item_1'));
+      expect(embedder.calls, isEmpty);
+      expect(responseCreates(), 1);
+    });
+
+    test('a turn no longer in the buffer, or without times, is the interviewer', () async {
+      await listen(tone(2000, ownerVoice));
+      // Starts after what was sent.
+      await rig.emit(_started('item_1', 5000));
+      await rig.emit(_stopped('item_1', 7000));
+      await rig.emit(_committed('item_1'));
+      // No start or stop at all.
+      await rig.emit(_committed('item_2'));
+      expect(embedder.calls, isEmpty);
+      expect(responseCreates(), 1);
+    });
+
+    test('one answer at a time: the next is asked for when the current one is done', () async {
+      await listen([...tone(3000, otherVoice), ...tone(3000, otherVoice)]);
+      await rig.emit(_started('a', 100));
+      await rig.emit(_stopped('a', 2900));
+      await rig.emit(_committed('a'));
+      await rig.emit(_transcript('a', 'Tell me about yourself.'));
+      expect(responseCreates(), 1);
+      await rig.emit(_created('resp_1'));
+      await rig.emit(_delta('resp_1', 'I build backends.'));
+
+      await rig.emit(_started('b', 3100));
+      await rig.emit(_stopped('b', 5900));
+      await rig.emit(_committed('b'));
+      await rig.emit(_transcript('b', 'Why Go?'));
+      // Still writing the first answer.
+      expect(responseCreates(), 1);
+
+      await rig.emit(_done('resp_1'));
+      expect(responseCreates(), 2);
+      await rig.emit(_created('resp_2'));
+      await rig.emit(_delta('resp_2', 'Simple concurrency.'));
+      await rig.emit(_done('resp_2'));
+
+      expect(
+        rig.c.cards.map((c) => c.question),
+        ['Why Go?', 'Tell me about yourself.'],
+      );
+      expect(rig.posts('/exchanges').map((r) => (r.body as Map)['question']), [
+        'Tell me about yourself.',
+        'Why Go?',
+      ]);
+    });
+
+    test('a refused response.create (one already active) is asked again, without a banner', () async {
+      await listen(tone(3000, otherVoice));
+      await rig.emit(_started('a', 100));
+      await rig.emit(_stopped('a', 2900));
+      await rig.emit(_committed('a'));
+      expect(responseCreates(), 1);
+      await rig.emit({
+        'type': 'error',
+        'error': {
+          'code': 'conversation_already_has_active_response',
+          'message': 'Conversation already has an active response.',
+        },
+      });
+      expect(rig.c.banner, isNull);
+      expect(responseCreates(), 1);
+      await rig.emit(_done('resp_0'));
+      expect(responseCreates(), 2);
+    });
+
+    test('only the interviewer\'s question is saved; the interviewee\'s words are not part of it', () async {
+      await listen([...tone(3000, ownerVoice), ...tone(3000, otherVoice)]);
+      await rig.emit(_started('me', 100));
+      await rig.emit(_stopped('me', 2900));
+      await rig.emit(_committed('me'));
+      await rig.emit(_transcript('me', 'Let me think about that.'));
+      await rig.emit(_started('them', 3100));
+      await rig.emit(_stopped('them', 5900));
+      await rig.emit(_committed('them'));
+      await rig.emit(_transcript('them', 'What is a closure?'));
+      expect(responseCreates(), 1);
+
+      await rig.emit(_created('resp_1'));
+      await rig.emit(_delta('resp_1', 'A function with its scope.'));
+      await rig.emit(_done('resp_1'));
+
+      expect(rig.c.cards.single.question, 'What is a closure?');
+      expect(rig.posts('/exchanges').single.body, {
+        'question': 'What is a closure?',
+        'answer': 'A function with its scope.',
+      });
+      expect(
+        rig.c.conversation.transcript.map((t) => (t.text, t.role)),
+        [
+          ('Let me think about that.', LiveRole.interviewee),
+          ('What is a closure?', LiveRole.interviewer),
+        ],
+      );
+    });
+
+    test('a reconnect starts the milliseconds again: turns are cut from the new connection', () async {
+      // The interviewer's voice on the first connection.
+      await listen(tone(3000, otherVoice));
+      rig.socket.drop();
+      await settle();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      await settle();
+      expect(rig.connector.sockets, hasLength(2));
+
+      // The user's voice on the new one, from its 0 ms.
+      rig.mic.push(tone(2000, ownerVoice));
+      await settle();
+      await rig.emit(_started('item_9', 0));
+      await rig.emit(_stopped('item_9', 1800));
+      await rig.emit(_committed('item_9'));
+      expect(rig.c.conversation.turn('item_9')!.role, LiveRole.interviewee);
+      expect(responseCreates(), 0);
+    });
+
+    test('a voice check that finishes after a reconnect is dropped', () async {
+      await listen(tone(3000, otherVoice));
+      embedder.hold = Completer<void>();
+      await rig.emit(_started('item_1', 200));
+      await rig.emit(_stopped('item_1', 2800));
+      await rig.emit(_committed('item_1'));
+      rig.socket.drop();
+      await settle();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      await settle();
+      embedder.hold!.complete();
+      await settle();
+      expect(rig.connector.sockets, hasLength(2));
+      expect(responseCreates(), 0);
+      expect(rig.connector.sockets.first.sentTypes, isNot(contains('response.create')));
+    });
+
+    test('a typed question is the interviewer\'s and waits its turn too', () async {
+      await listen(tone(3000, otherVoice));
+      await rig.emit(_started('a', 100));
+      await rig.emit(_stopped('a', 2900));
+      await rig.emit(_committed('a'));
+      await rig.emit(_created('resp_1'));
+      expect(await rig.c.ask('What is REST?'), isTrue);
+      expect(rig.socket.sentTypes.last, 'conversation.item.create');
+      expect(responseCreates(), 1);
+      await rig.emit(_done('resp_1'));
+      expect(responseCreates(), 2);
+    });
   });
 }

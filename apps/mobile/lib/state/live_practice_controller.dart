@@ -4,7 +4,10 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 
+import '../learn/live/pcm_ring_buffer.dart';
 import '../learn/live/realtime_client.dart';
+import '../learn/live/speaker_embedder.dart';
+import '../learn/live/voice_math.dart';
 import '../models/live_practice.dart';
 import '../services/api_client.dart';
 
@@ -13,15 +16,39 @@ const liveMicDeniedMessage =
     "Offerpath can't use the microphone. Allow it in your phone's settings "
     '(Apps → Offerpath → Permissions), or type a question below.';
 
+/// What the screen says when the phone can't tell the user's voice apart.
+const liveVoiceHint =
+    'Set up your voice so only the interviewer gets answers';
+
+/// A turn shorter than this is too short to tell whose voice it is; it
+/// counts as the interviewer's.
+const liveMinCheckedTurn = Duration(seconds: 1);
+
+/// Loads what a session needs to recognise the user's voice; null when it
+/// can't (then every turn is answered).
+typedef LiveVoiceLoader = Future<LiveVoice?> Function();
+
 /// The connection to OpenAI Realtime.
 enum LiveConnection { offline, connecting, connected, reconnecting }
 
+/// One spoken turn's voice check, by OpenAI's item id.
+class _TurnCheck {
+  int? startMs;
+  int? endMs;
+  bool committed = false;
+  LiveRole? role;
+  bool asked = false;
+}
+
 /// One live-practice session on screen. Listening gets a realtime pass from
-/// the API, connects to OpenAI and streams the microphone ~100 ms at a time;
-/// [conversation] turns OpenAI's events into answer cards, and each finished
-/// card is saved as an exchange. A dropped connection is reconnected with a
-/// new pass while listening. Also: typed questions, the "answers for"
-/// switch, ending and deleting.
+/// the API, connects to OpenAI and streams the microphone ~100 ms at a time,
+/// keeping the last minute of it. When OpenAI's voice detection ends a turn,
+/// the turn's audio is compared with the user's voiceprint: the user's own
+/// turns (the interviewee's) are only captioned, and an answer is asked for
+/// each of the interviewer's (`docs/live-practice.md`). [conversation] turns
+/// OpenAI's events into captions and answer cards, and each finished card is
+/// saved as an exchange. A dropped connection is reconnected with a new pass
+/// while listening. Also: typed questions, ending and deleting.
 class LivePracticeController extends ChangeNotifier {
   LivePracticeController({
     required this.api,
@@ -29,6 +56,7 @@ class LivePracticeController extends ChangeNotifier {
     LivePracticeView? initial,
     LiveMic? mic,
     RealtimeConnector? connect,
+    this._loadVoice,
     this.reconnectDelays = const [
       Duration(seconds: 1),
       Duration(seconds: 2),
@@ -43,7 +71,7 @@ class LivePracticeController extends ChangeNotifier {
       onChanged: _notify,
       onFinished: (card) => unawaited(_save(card)),
       onError: _onRealtimeError,
-      answerFor: initial?.answerFor ?? AnswerFor.me,
+      checksSpeakers: true,
       transcriptWait: transcriptWait,
     );
   }
@@ -52,6 +80,7 @@ class LivePracticeController extends ChangeNotifier {
   final String sessionId;
   final LiveMic mic;
   final RealtimeConnector _connector;
+  final LiveVoiceLoader? _loadVoice;
 
   /// Waits between reconnect attempts (the first one is immediate).
   final List<Duration> reconnectDelays;
@@ -79,8 +108,15 @@ class LivePracticeController extends ChangeNotifier {
   /// OpenAI's (or the server's) last error, word for word, until dismissed.
   String? banner;
 
-  bool changingAnswerFor = false;
   bool ending = false;
+
+  /// The user's voiceprint and the model to compare turns with it; null
+  /// when it isn't set up (then every turn is answered).
+  LiveVoice? voice;
+
+  /// The voice has been looked for ([loadVoice]).
+  bool voiceChecked = false;
+  Future<void>? _voiceLoading;
 
   /// Typed questions being sent.
   int asking = 0;
@@ -100,12 +136,32 @@ class LivePracticeController extends ChangeNotifier {
   Completer<void>? _reconnectDone;
   StreamSubscription<Uint8List>? _micSub;
   final BytesBuilder _pending = BytesBuilder();
+
+  /// What was sent on this connection, by milliseconds since its first byte.
+  final PcmRingBuffer _sentAudio = PcmRingBuffer();
+
+  /// Counts connections, so a voice check that finishes after a reconnect
+  /// is dropped.
+  int _connectionNo = 0;
+  final Map<String, _TurnCheck> _checks = {};
+
+  /// Turns waiting for an answer to be asked for (one answer at a time).
+  final List<LiveTurn> _toAnswer = [];
+
+  /// An answer was asked for and isn't done yet.
+  bool _answerActive = false;
+
+  /// ... and hasn't started either.
+  bool _answerRequested = false;
   final Set<Future<void>> _saves = {};
   final Set<Timer> _timers = {};
   bool _disposed = false;
   bool _loading = false;
 
   bool get isEnded => view?.isEnded ?? false;
+
+  /// Show "set up your voice": it's been looked for and isn't there.
+  bool get showVoiceHint => voiceChecked && voice == null;
 
   /// Cards to show while the session runs, newest first.
   List<LiveCard> get cards => conversation.visibleCards.reversed.toList();
@@ -165,6 +221,177 @@ class LivePracticeController extends ChangeNotifier {
     }
   }
 
+  // -- Your voice -------------------------------------------------------------
+
+  /// Looks for the user's voiceprint (once; [reloadVoice] looks again).
+  Future<void> loadVoice() => _voiceLoading ??= _loadVoiceNow();
+
+  Future<void> _loadVoiceNow() async {
+    LiveVoice? found;
+    try {
+      found = await _loadVoice?.call();
+    } catch (_) {
+      found = null;
+    }
+    if (_disposed) {
+      unawaited(found?.dispose().catchError((Object _) {}));
+      return;
+    }
+    final old = voice;
+    voice = found;
+    voiceChecked = true;
+    if (old != null && !identical(old, found)) {
+      unawaited(old.dispose().catchError((Object _) {}));
+    }
+    _notify();
+  }
+
+  /// Looks for the voiceprint again (after the voice setup).
+  Future<void> reloadVoice() {
+    _voiceLoading = null;
+    return loadVoice();
+  }
+
+  /// Who spoke each turn, from OpenAI's voice detection events.
+  void _route(Map<String, dynamic> e) {
+    final itemId = e['item_id'];
+    switch (e['type']) {
+      case 'input_audio_buffer.speech_started':
+        if (itemId is! String) return;
+        _checkFor(itemId).startMs = _intOf(e['audio_start_ms']);
+      case 'input_audio_buffer.speech_stopped':
+        if (itemId is! String) return;
+        final check = _checkFor(itemId)..endMs = _intOf(e['audio_end_ms']);
+        _classify(itemId, check);
+      case 'input_audio_buffer.committed':
+        if (itemId is! String) return;
+        final check = _checkFor(itemId)..committed = true;
+        if (check.role == null && check.endMs == null) {
+          // No end of speech was seen: nothing to check.
+          _decide(itemId, check, LiveRole.interviewer);
+        } else {
+          _askIfReady(itemId, check);
+        }
+      case 'response.created':
+        _answerRequested = false;
+      case 'response.done':
+        _answerActive = false;
+        _answerRequested = false;
+        _askNext();
+      case 'error':
+        final err = e['error'];
+        final code = err is Map ? err['code'] : null;
+        if (code == 'conversation_already_has_active_response') {
+          // Ours was refused: ask again when that one is done.
+          _toAnswer.insertAll(0, conversation.withdrawExpected());
+          _answerActive = true;
+          _answerRequested = false;
+        } else if (_answerRequested) {
+          // The request itself failed; don't wait for it.
+          conversation.withdrawExpected();
+          _answerActive = false;
+          _answerRequested = false;
+          _askNext();
+        }
+    }
+  }
+
+  static int? _intOf(Object? v) => v is num ? v.toInt() : null;
+
+  _TurnCheck _checkFor(String itemId) {
+    final known = _checks[itemId];
+    if (known != null) return known;
+    if (_checks.length > 200) _checks.remove(_checks.keys.first);
+    return _checks[itemId] = _TurnCheck();
+  }
+
+  /// Compares the turn's audio with the voiceprint. Too short, not in the
+  /// buffer, or no voice set up: the interviewer's.
+  void _classify(String itemId, _TurnCheck check) {
+    if (check.role != null) return;
+    final voice = this.voice;
+    final start = check.startMs, end = check.endMs;
+    if (voice == null ||
+        start == null ||
+        end == null ||
+        end - start < liveMinCheckedTurn.inMilliseconds) {
+      _decide(itemId, check, LiveRole.interviewer);
+      return;
+    }
+    final pcm = _sentAudio.slice(start, end);
+    if (pcm == null) {
+      _decide(itemId, check, LiveRole.interviewer);
+      return;
+    }
+    final connectionNo = _connectionNo;
+    unawaited(() async {
+      var role = LiveRole.interviewer;
+      try {
+        final similarity = await voice.similarity(
+          speakerSamples(pcm, fromRate: realtimeSampleRate),
+        );
+        if (similarity >= voice.threshold) role = LiveRole.interviewee;
+      } catch (_) {}
+      if (_disposed || connectionNo != _connectionNo) return;
+      _decide(itemId, check, role);
+    }());
+  }
+
+  void _decide(String itemId, _TurnCheck check, LiveRole role) {
+    if (check.role != null) return;
+    check.role = role;
+    conversation.setRole(itemId, role);
+    _askIfReady(itemId, check);
+  }
+
+  /// The interviewer's turn is in the conversation: ask for its answer.
+  void _askIfReady(String itemId, _TurnCheck check) {
+    if (check.asked || !check.committed || check.role != LiveRole.interviewer) {
+      return;
+    }
+    check.asked = true;
+    final turn = conversation.turn(itemId);
+    if (turn != null) _ask(turn);
+  }
+
+  /// Asks for an answer to [turn], or queues it while one is being written.
+  void _ask(LiveTurn turn) {
+    _toAnswer.add(turn);
+    _askNext();
+  }
+
+  void _askNext() {
+    if (_answerActive || _toAnswer.isEmpty || _socket == null) return;
+    conversation.expectAnswer(List.of(_toAnswer));
+    _toAnswer.clear();
+    _answerActive = true;
+    _answerRequested = true;
+    _send(responseCreateEvent);
+  }
+
+  /// A new connection: new milliseconds, nothing pending.
+  void _resetTurns() {
+    _connectionNo++;
+    _sentAudio.reset();
+    _checks.clear();
+    _toAnswer.clear();
+    _answerActive = false;
+    _answerRequested = false;
+  }
+
+  void _onMessage(String raw) {
+    Object? decoded;
+    try {
+      decoded = jsonDecode(raw);
+    } catch (_) {
+      return;
+    }
+    if (decoded is! Map) return;
+    final event = decoded.cast<String, dynamic>();
+    conversation.handleEvent(event);
+    if (!_disposed) _route(event);
+  }
+
   // -- Connection -------------------------------------------------------------
 
   /// A pass from the API, then the socket. Throws when either fails.
@@ -178,9 +405,10 @@ class LivePracticeController extends ChangeNotifier {
       unawaited(socket.close());
       return;
     }
+    _resetTurns();
     _socket = socket;
     _socketSub = socket.messages.listen(
-      conversation.handle,
+      _onMessage,
       onError: (Object _) {},
       onDone: () => _onClosed(socket),
     );
@@ -245,6 +473,7 @@ class LivePracticeController extends ChangeNotifier {
   void _closeSocket() {
     final socket = _socket;
     _socket = null;
+    _resetTurns();
     unawaited(_socketSub?.cancel());
     _socketSub = null;
     if (socket != null) unawaited(socket.close());
@@ -252,9 +481,8 @@ class LivePracticeController extends ChangeNotifier {
   }
 
   /// A new pass and a new socket, a few times with a growing wait. The cards
-  /// stay; an answer cut off midway is kept as it was. With [always] it
-  /// reconnects even when not listening (a new "answers for").
-  Future<void> _reconnect({bool always = false}) async {
+  /// stay; an answer cut off midway is kept as it was.
+  Future<void> _reconnect() async {
     if (_reconnecting || _disposed) return;
     _reconnecting = true;
     final done = _reconnectDone = Completer<void>();
@@ -265,7 +493,7 @@ class LivePracticeController extends ChangeNotifier {
     Object? failure;
     for (var attempt = 0; attempt <= reconnectDelays.length; attempt++) {
       if (attempt > 0) await _sleep(reconnectDelays[attempt - 1]);
-      if (_disposed || (!always && !listening) || isEnded) {
+      if (_disposed || !listening || isEnded) {
         failure = null;
         break;
       }
@@ -295,6 +523,9 @@ class LivePracticeController extends ChangeNotifier {
   }
 
   void _onRealtimeError(String message, String? code) {
+    // An answer was asked for while one was being written: it's asked again
+    // when that one is done.
+    if (code == 'conversation_already_has_active_response') return;
     final expired =
         code == 'session_expired' ||
         message.toLowerCase().contains('maximum duration');
@@ -325,6 +556,9 @@ class LivePracticeController extends ChangeNotifier {
         return false;
       }
       if (_disposed || !await _ensureConnected() || _disposed) return false;
+      // Turns are checked against the voiceprint from the first one.
+      await loadVoice();
+      if (_disposed) return false;
       final stream = await mic.start();
       if (_disposed) return false;
       _micSub = stream.listen(_onAudio, onError: (Object _) {});
@@ -354,7 +588,13 @@ class LivePracticeController extends ChangeNotifier {
     if (bytes.isEmpty) return;
     level.value = pcmLevel(bytes);
     // Not connected (reconnecting): the audio is dropped.
-    if (_socket != null) _send(appendAudioEvent(bytes));
+    if (_socket != null) _sendAudio(bytes);
+  }
+
+  /// Sends audio and keeps it, so a turn can be cut out of it.
+  void _sendAudio(Uint8List bytes) {
+    _sentAudio.add(bytes);
+    _send(appendAudioEvent(bytes));
   }
 
   /// Turns the mic off. Speech cut off midway is still answered: a second
@@ -374,7 +614,7 @@ class LivePracticeController extends ChangeNotifier {
     _flushAudio();
     _pending.clear();
     if (conversation.speech == LiveSpeech.hearing && _socket != null) {
-      _send(appendAudioEvent(Uint8List(realtimeSampleRate * 2)));
+      _sendAudio(Uint8List(realtimeSampleRate * 2));
     }
     if (!_disposed) level.value = 0;
   }
@@ -384,8 +624,8 @@ class LivePracticeController extends ChangeNotifier {
 
   // -- Questions and answers --------------------------------------------------
 
-  /// A typed question, answered like a spoken one. Returns whether it was
-  /// sent.
+  /// A typed question, answered like the interviewer's spoken ones. Returns
+  /// whether it was sent.
   Future<bool> ask(String text) async {
     final t = text.trim();
     if (t.isEmpty || isEnded || _disposed) return false;
@@ -398,10 +638,9 @@ class LivePracticeController extends ChangeNotifier {
     _notify();
     try {
       if (!await _ensureConnected() || _disposed) return false;
-      conversation.addTyped(t);
-      for (final event in typedQuestionEvents(t)) {
-        _send(event);
-      }
+      final turn = conversation.addTyped(t);
+      _send(typedQuestionItem(t));
+      _ask(turn);
       return true;
     } finally {
       asking--;
@@ -455,29 +694,6 @@ class LivePracticeController extends ChangeNotifier {
   Future<void> retrySave(LiveCard card) {
     if (card.save != LiveSaveState.failed) return Future.value();
     return _save(card);
-  }
-
-  /// Who the answers are written for. The pass carries it, so a live
-  /// connection is replaced with a new one.
-  Future<void> setAnswerFor(AnswerFor answerFor) async {
-    final current = view;
-    if (current == null ||
-        changingAnswerFor ||
-        current.answerFor == answerFor) {
-      return;
-    }
-    changingAnswerFor = true;
-    _notify();
-    try {
-      _apply(await api.updateLivePractice(sessionId, answerFor: answerFor));
-      conversation.answerFor = view!.answerFor;
-      if (_socket != null || listening) unawaited(_reconnect(always: true));
-    } catch (error) {
-      _fail(error);
-    } finally {
-      changingAnswerFor = false;
-      _notify();
-    }
   }
 
   /// Stops listening, saves the answers on screen, closes the connection and
@@ -541,6 +757,8 @@ class LivePracticeController extends ChangeNotifier {
     listening = false;
     unawaited(mic.dispose().catchError((Object _) {}));
     _closeSocket();
+    unawaited(voice?.dispose().catchError((Object _) {}));
+    voice = null;
     conversation.dispose();
     level.dispose();
     super.dispose();

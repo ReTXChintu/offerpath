@@ -207,4 +207,67 @@ void main() {
     expect(isNotAQuestion('-1 is negative'), isFalse);
     expect(AnswerFor.values, hasLength(2));
   });
+
+  group('with speaker checks', () {
+    late LiveConversation checked;
+
+    setUp(() {
+      checked = LiveConversation(
+        onChanged: () {},
+        onFinished: finished.add,
+        onError: (message, code) => errors.add(message),
+        checksSpeakers: true,
+        transcriptWait: const Duration(milliseconds: 20),
+      );
+    });
+    tearDown(() => checked.dispose());
+
+    void hear(Map<String, Object?> event) => checked.handle(jsonEncode(event));
+
+    test('a turn has no role until it is set; the interviewee is never part of a question', () {
+      hear({'type': 'input_audio_buffer.committed', 'item_id': 'me'});
+      expect(checked.turn('me')!.role, isNull);
+      hear({'type': 'input_audio_buffer.committed', 'item_id': 'them'});
+      checked.setRole('me', LiveRole.interviewee);
+      checked.setRole('them', LiveRole.interviewer);
+      hear({
+        'type': 'conversation.item.input_audio_transcription.completed',
+        'item_id': 'me',
+        'transcript': 'Hmm.',
+      });
+      hear({
+        'type': 'conversation.item.input_audio_transcription.completed',
+        'item_id': 'them',
+        'transcript': 'What is Kafka?',
+      });
+      // No expectAnswer: the interviewer's unanswered turns are the question.
+      hear({'type': 'response.created', 'response': {'id': 'r1'}});
+      hear({'type': 'response.output_text.delta', 'response_id': 'r1', 'delta': 'A log.'});
+      hear({'type': 'response.done', 'response': {'id': 'r1', 'status': 'completed'}});
+      expect(finished.single.question, 'What is Kafka?');
+      expect(checked.transcript.map((t) => t.role), [
+        LiveRole.interviewee,
+        LiveRole.interviewer,
+      ]);
+    });
+
+    test('an answer asked for takes exactly its turns, in order', () {
+      hear({'type': 'input_audio_buffer.committed', 'item_id': 'a'});
+      hear({'type': 'input_audio_buffer.committed', 'item_id': 'b'});
+      checked.setRole('a', LiveRole.interviewer);
+      checked.setRole('b', LiveRole.interviewer);
+      checked.expectAnswer([checked.turn('a')!]);
+      checked.expectAnswer([checked.turn('b')!]);
+      hear({'type': 'response.created', 'response': {'id': 'r1'}});
+      hear({'type': 'response.created', 'response': {'id': 'r2'}});
+      expect(checked.cards.map((c) => c.turns.single.itemId), ['a', 'b']);
+      expect(checked.withdrawExpected(), isEmpty);
+    });
+
+    test('a typed question is always the interviewer\'s', () {
+      expect(checked.addTyped('Why?').role, LiveRole.interviewer);
+      // Not a spoken line.
+      expect(checked.transcript, isEmpty);
+    });
+  });
 }

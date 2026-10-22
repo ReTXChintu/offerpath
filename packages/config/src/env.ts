@@ -89,8 +89,8 @@ export const envSchema = z
     OPENAI_FALLBACK_MODEL_FAST: z.string().default('gpt-4.1-mini'),
     OPENAI_FALLBACK_MODEL_REASONING: z.string().default('gpt-4.1'),
     /** Live practice: the Realtime model, and its captions' speech to text. */
-    OPENAI_REALTIME_MODEL: z.string().default('gpt-realtime'),
-    OPENAI_TRANSCRIBE_MODEL: z.string().default('gpt-4o-mini-transcribe'),
+    OPENAI_REALTIME_MODEL: z.string().default('gpt-realtime-2.1'),
+    OPENAI_TRANSCRIBE_MODEL: z.string().default('gpt-transcribe'),
 
     /** A phone's pairing code, shown on the desktop as a QR code, lives this long. */
     PAIRING_CODE_TTL_SECS: z.coerce.number().int().min(30).max(3_600).default(300),

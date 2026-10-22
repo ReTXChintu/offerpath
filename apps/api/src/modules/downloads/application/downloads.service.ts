@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { createReadStream } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -21,6 +23,15 @@ export interface DownloadInfo {
   url: string;
   /** Windows only: whether a Tauri updater signature sits next to it. */
   signed?: boolean;
+}
+
+/** The speaker model live practice recognises the user's voice with. */
+export interface SpeakerModelInfo {
+  fileName: string;
+  sizeBytes: number;
+  /** Hex; the phone checks the download against it. */
+  sha256: string;
+  url: string;
 }
 
 export const MIME: Record<Platform, string> = {
@@ -92,6 +103,45 @@ export class DownloadsService {
     return { fullPath: best.fullPath, info };
   }
 
+  /**
+   * The speaker model for live practice's voice recognition: the newest
+   * .onnx in <downloads>/models, put there by hand (docs/deploy.md). Its
+   * checksum is worked out once per file version.
+   */
+  async speakerModel(prefix: string): Promise<{ fullPath: string; info: SpeakerModelInfo } | null> {
+    const dir = path.join(this.dir, 'models');
+    let names: string[];
+    try {
+      names = await readdir(dir);
+    } catch {
+      return null;
+    }
+    let best: { fullPath: string; name: string; size: number; mtime: Date } | null = null;
+    for (const name of names) {
+      if (!name.toLowerCase().endsWith('.onnx')) continue;
+      const fullPath = path.join(dir, name);
+      const s = await stat(fullPath).catch(() => null);
+      if (!s?.isFile()) continue;
+      if (!best || s.mtime > best.mtime) best = { fullPath, name, size: s.size, mtime: s.mtime };
+    }
+    if (!best) return null;
+    const key = `${best.fullPath}:${best.size}:${best.mtime.getTime()}`;
+    if (this.modelHash?.key !== key) {
+      this.modelHash = { key, sha256: await sha256(best.fullPath) };
+    }
+    return {
+      fullPath: best.fullPath,
+      info: {
+        fileName: best.name,
+        sizeBytes: best.size,
+        sha256: this.modelHash.sha256,
+        url: `${prefix}/downloads/speaker-model/file`,
+      },
+    };
+  }
+
+  private modelHash: { key: string; sha256: string } | null = null;
+
   /** Tauri's updater "static JSON", or null when there's no signed installer. */
   async windowsUpdateManifest(origin: string, prefix: string) {
     const build = await this.newest('windows', prefix);
@@ -106,4 +156,14 @@ export class DownloadsService {
       },
     };
   }
+}
+
+function sha256(file: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = createHash('sha256');
+    createReadStream(file)
+      .on('data', (chunk) => hash.update(chunk))
+      .on('end', () => resolve(hash.digest('hex')))
+      .on('error', reject);
+  });
 }

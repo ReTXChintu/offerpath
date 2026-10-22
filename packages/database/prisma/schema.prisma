@@ -45,6 +45,7 @@ model User {
   interviewPreps    InterviewPrep[]
   mockInterviews    MockInterview[]
   livePractice      LivePracticeSession[]
+  liveVoice         LivePracticeVoice?
   conceptChats      ConceptChatMessage[]
   questionAnswers   ConceptQuestionAnswer[]
   assignments       PracticeAssignment[]
@@ -1677,4 +1678,21 @@ model LivePracticeExchange {
 
   @@unique([sessionId, order])
   @@map("live_practice_exchanges")
+}
+
+/// The user's voiceprint for live practice: an embedding the phone computes
+/// on the device (sherpa-onnx), so it can tell the interviewee (this user)
+/// from the interviewer. Only valid with the speaker model it was made with.
+model LivePracticeVoice {
+  userId    String   @id
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// The speaker model's file name.
+  model     String
+  embedding Float[]
+  /// Cosine similarity at or above which a turn is this user's.
+  threshold Float    @default(0.5)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("live_practice_voices")
 }

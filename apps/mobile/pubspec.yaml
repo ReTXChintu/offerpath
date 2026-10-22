@@ -33,6 +33,12 @@ dependencies:
   # listening. Exact pins: newer releases are under the two-week rule.
   record: 7.1.1
   wakelock_plus: 1.8.1
+  # Live practice: recognises the user's voice on the phone (a speaker
+  # embedding from sherpa-onnx's WeSpeaker model, which the app downloads
+  # once from the server), so only the interviewer's questions are answered.
+  sherpa_onnx: 1.13.8
+  path_provider: ^2.1.6
+  crypto: ^3.0.7
 
 dev_dependencies:
   flutter_test:

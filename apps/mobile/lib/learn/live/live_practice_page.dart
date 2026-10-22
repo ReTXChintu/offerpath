@@ -8,6 +8,8 @@ import '../../widgets/common.dart';
 import '../simple_markdown.dart';
 import '../ui.dart';
 import 'realtime_client.dart';
+import 'voice_repository.dart';
+import 'voice_setup_page.dart';
 
 /// Keeps the screen on (or lets it sleep). Failures are ignored: a screen
 /// that dims is no reason to stop practising.
@@ -20,10 +22,11 @@ Future<void> platformLiveWakelock(bool on) async {
 }
 
 /// One live-practice session: the phone on the table between two people.
-/// The mic button starts and pauses listening; whenever anyone asks a
-/// question, a card shows it with a direct answer that fills in as it's
-/// written (newest first). The screen stays on while listening. An ended
-/// session shows its saved questions and answers.
+/// The mic button starts and pauses listening. What's said shows as captions
+/// labelled "Interviewer" or "You" (the phone knows the user's voice); when
+/// the interviewer asks a question, a card shows it with a direct answer that
+/// fills in as it's written (newest first). The screen stays on while
+/// listening. An ended session shows its saved questions and answers.
 class LivePracticePage extends StatefulWidget {
   const LivePracticePage({
     required this.api,
@@ -33,6 +36,7 @@ class LivePracticePage extends StatefulWidget {
     this.mic,
     this.connect,
     this.wakelock = platformLiveWakelock,
+    this.voice,
     super.key,
   });
 
@@ -50,18 +54,25 @@ class LivePracticePage extends StatefulWidget {
   final RealtimeConnector? connect;
   final LiveWakelock wakelock;
 
+  /// The user's voice (fakes in tests); the server's and the phone's by
+  /// default.
+  final VoiceRepository? voice;
+
   @override
   State<LivePracticePage> createState() => _LivePracticePageState();
 }
 
 class _LivePracticePageState extends State<LivePracticePage>
     with WidgetsBindingObserver {
+  late final VoiceRepository _voice =
+      widget.voice ?? VoiceRepository(api: widget.api);
   late final LivePracticeController _c = LivePracticeController(
     api: widget.api,
     sessionId: widget.sessionId,
     initial: widget.initial,
     mic: widget.mic,
     connect: widget.connect,
+    loadVoice: _voice.sessionVoice,
   );
   final _text = TextEditingController();
   bool _awake = false;
@@ -72,6 +83,7 @@ class _LivePracticePageState extends State<LivePracticePage>
     WidgetsBinding.instance.addObserver(this);
     _c.addListener(_onChange);
     if (widget.initial == null) _c.load();
+    if (widget.initial?.isEnded != true) _c.loadVoice();
     if (widget.autoStart) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && widget.initial?.isActive == true) _c.startListening();
@@ -110,6 +122,11 @@ class _LivePracticePageState extends State<LivePracticePage>
           .showSnackBar(SnackBar(content: Text(error)));
     }
     if (mounted) setState(() {});
+  }
+
+  Future<void> _setUpVoice() async {
+    await openVoiceSetup(context, _voice);
+    if (mounted) await _c.reloadVoice();
   }
 
   Future<void> _ask() async {
@@ -201,23 +218,19 @@ class _LivePracticePageState extends State<LivePracticePage>
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
               children: [
+                if (view.isActive && _c.showVoiceHint) ...[
+                  _VoiceHint(onSetUp: _setUpVoice),
+                  const SizedBox(height: 12),
+                ],
                 view.isActive
                     ? _MicPanel(controller: _c, onEnd: _end)
                     : _SummaryPanel(view: view),
-                if (view.isActive) ...[
-                  const SizedBox(height: 14),
-                  _AnswersFor(
-                    answerFor: view.answerFor,
-                    busy: _c.changingAnswerFor,
-                    onChanged: _c.setAnswerFor,
-                  ),
-                ],
                 const SizedBox(height: 20),
                 SectionLabel('Questions · ${cards.length + saved.length}'),
                 if (cards.isEmpty && saved.isEmpty)
                   Text(
                     view.isActive
-                        ? 'No questions yet. Ask any interview question out loud; the answer shows up here.'
+                        ? "No questions yet. When the interviewer asks one out loud, the answer shows up here."
                         : 'No questions were answered in this session.',
                     style: TextStyle(
                       fontSize: 13,
@@ -230,7 +243,6 @@ class _LivePracticePageState extends State<LivePracticePage>
                     key: ValueKey(card.id),
                     question: card.question,
                     answer: card.answer,
-                    answerFor: card.answerFor,
                     writing: !card.answerDone,
                     waitingForQuestion: !card.questionDone,
                     saveError: card.save == LiveSaveState.failed
@@ -329,7 +341,8 @@ class _MicPanel extends StatelessWidget {
           c.conversation.answering ? 'Thinking…' : 'Ask any question.',
       },
     };
-    final caption = c.conversation.caption.trim();
+    final lines = c.conversation.transcript;
+    final recent = lines.length > 4 ? lines.sublist(lines.length - 4) : lines;
     return LearnPanel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -423,40 +436,31 @@ class _MicPanel extends StatelessWidget {
               style: TextStyle(fontSize: 13, color: tone.fail, height: 1.4),
             ),
           ],
-          if (caption.isNotEmpty) ...[
+          if (recent.isNotEmpty) ...[
             const SizedBox(height: 12),
             Container(
-              key: const ValueKey('live-caption'),
+              key: const ValueKey('live-transcript'),
               padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
               decoration: BoxDecoration(
                 color: tone.raised,
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Icon(Icons.hearing, size: 16, color: tone.muted),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      caption,
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: tone.body,
-                        fontStyle: FontStyle.italic,
-                        height: 1.4,
-                      ),
+                  for (final line in recent)
+                    _CaptionLine(
+                      key: ValueKey('line-${line.itemId}'),
+                      turn: line,
+                      knowsVoices: c.voice != null,
                     ),
-                  ),
                 ],
               ),
             ),
           ],
           const SizedBox(height: 10),
           Text(
-            'Put the phone between you and ask any interview question. For practice with a partner only.',
+            "Put the phone between you. You're the interviewee: only the interviewer's questions get answers. For practice with a partner only.",
             style: TextStyle(fontSize: 12, color: tone.muted, height: 1.4),
           ),
           const SizedBox(height: 10),
@@ -513,60 +517,90 @@ class _SummaryPanel extends StatelessWidget {
   }
 }
 
-/// "Answers for: Me / Neutral".
-class _AnswersFor extends StatelessWidget {
-  const _AnswersFor({
-    required this.answerFor,
-    required this.busy,
-    required this.onChanged,
-  });
+/// "Set up your voice so only the interviewer gets answers".
+class _VoiceHint extends StatelessWidget {
+  const _VoiceHint({required this.onSetUp});
 
-  final AnswerFor answerFor;
-  final bool busy;
-  final ValueChanged<AnswerFor> onChanged;
+  final VoidCallback onSetUp;
 
   @override
   Widget build(BuildContext context) {
     final tone = LearnTone.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(bottom: 6),
-          child: Text(
-            'Answers for',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              color: tone.muted,
+    return Container(
+      key: const ValueKey('live-voice-hint'),
+      padding: const EdgeInsets.fromLTRB(12, 6, 6, 6),
+      decoration: BoxDecoration(
+        color: LearnTone.warn.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.record_voice_over, size: 18, color: LearnTone.warn),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              liveVoiceHint,
+              style: TextStyle(fontSize: 12.5, color: tone.body, height: 1.4),
             ),
           ),
-        ),
-        SegmentedButton<AnswerFor>(
-          segments: const [
-            ButtonSegment(
-              value: AnswerFor.me,
-              label: Text('Me'),
-              icon: Icon(Icons.person_outline),
+          TextButton(onPressed: onSetUp, child: const Text('Set up')),
+        ],
+      ),
+    );
+  }
+}
+
+/// One caption: who said it, and what.
+class _CaptionLine extends StatelessWidget {
+  const _CaptionLine({
+    required this.turn,
+    required this.knowsVoices,
+    super.key,
+  });
+
+  final LiveTurn turn;
+
+  /// The user's voice is recognised (else every turn is just "heard").
+  final bool knowsVoices;
+
+  @override
+  Widget build(BuildContext context) {
+    final tone = LearnTone.of(context);
+    final (label, color) = switch (turn.role) {
+      LiveRole.interviewee => ('You', LearnTone.pass),
+      LiveRole.interviewer when knowsVoices => ('Interviewer', tone.accent),
+      LiveRole.interviewer => ('Heard', tone.muted),
+      null => ('…', tone.muted),
+    };
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ConstrainedBox(
+            constraints: const BoxConstraints(minWidth: 84),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              widthFactor: 1,
+              child: Tag(label, color: color),
             ),
-            ButtonSegment(
-              value: AnswerFor.neutral,
-              label: Text('Neutral'),
-              icon: Icon(Icons.public),
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              turn.text.trim(),
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 13,
+                color: tone.body,
+                fontStyle: FontStyle.italic,
+                height: 1.4,
+              ),
             ),
-          ],
-          selected: {answerFor},
-          showSelectedIcon: false,
-          onSelectionChanged: busy ? null : (s) => onChanged(s.first),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          answerFor == AnswerFor.me
-              ? 'Answers are yours, from your CV or profile.'
-              : 'Answers are for any candidate, without your CV.',
-          style: TextStyle(fontSize: 11.5, color: tone.muted, height: 1.4),
-        ),
-      ],
+          ),
+        ],
+      ),
     );
   }
 }
@@ -576,7 +610,7 @@ class LiveAnswerCard extends StatelessWidget {
   const LiveAnswerCard({
     required this.question,
     required this.answer,
-    required this.answerFor,
+    this.answerFor = AnswerFor.me,
     this.writing = false,
     this.waitingForQuestion = false,
     this.saveError,
@@ -586,6 +620,9 @@ class LiveAnswerCard extends StatelessWidget {
 
   final String question;
   final String answer;
+
+  /// `neutral` only on exchanges saved before answers were always the
+  /// user's.
   final AnswerFor answerFor;
   final bool writing;
 

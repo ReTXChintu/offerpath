@@ -2,16 +2,21 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:offerpath_mobile/learn/live/live_practice_list_page.dart';
 import 'package:offerpath_mobile/learn/live/live_practice_page.dart';
+import 'package:offerpath_mobile/learn/live/voice_repository.dart';
+import 'package:offerpath_mobile/learn/live/voice_setup_page.dart';
 import 'package:offerpath_mobile/learn/prep_detail_page.dart';
 import 'package:offerpath_mobile/state/live_practice_controller.dart';
 
 import '../support/fake_api.dart';
 import '../support/fake_realtime.dart';
+import '../support/fake_voice.dart';
 import '../support/live_fixtures.dart';
 import '../support/prep_fixtures.dart';
 
 const _base = '/api/v1/live-practice';
 const _get = '$_base/s1';
+const _voice = '$_base/voice';
+const _model = '/api/v1/downloads/speaker-model';
 
 Finder _rich(String text) => find.textContaining(text, findRichText: true);
 
@@ -19,11 +24,13 @@ void main() {
   late FakeLiveMic mic;
   late FakeConnector connector;
   late List<bool> wakelock;
+  late FakeEmbedder embedder;
 
   setUp(() {
     mic = FakeLiveMic();
     connector = FakeConnector();
     wakelock = [];
+    embedder = FakeEmbedder();
   });
 
   void tallScreen(WidgetTester tester) {
@@ -50,6 +57,7 @@ void main() {
           mic: mic,
           connect: connector.call,
           wakelock: (on) async => wakelock.add(on),
+          voice: fakeVoiceRepo(fake.client(), embedder: embedder),
         ),
       ),
     );
@@ -70,6 +78,10 @@ void main() {
       expect(find.text('React, Node.js'), findsOneWidget);
       expect(find.text('Paused'), findsOneWidget);
       expect(find.text('QUESTIONS · 0'), findsOneWidget);
+      // No voice set up: every turn gets an answer, and it says how to fix it.
+      expect(find.byKey(const ValueKey('live-voice-hint')), findsOneWidget);
+      expect(find.text(liveVoiceHint), findsOneWidget);
+      expect(find.text('Answers for'), findsNothing);
 
       await tester.tap(find.byKey(const ValueKey('live-mic')));
       await flush(tester);
@@ -91,8 +103,10 @@ void main() {
         });
       await flush(tester);
       expect(find.text('Thinking…'), findsOneWidget);
-      expect(find.byKey(const ValueKey('live-caption')), findsOneWidget);
+      expect(find.byKey(const ValueKey('live-transcript')), findsOneWidget);
       expect(find.text('How do you reverse'), findsOneWidget);
+      // Without a voiceprint it can't say who spoke.
+      expect(find.text('Heard'), findsOneWidget);
 
       socket
         ..emit({
@@ -201,17 +215,15 @@ void main() {
   });
 
   testWidgets(
-    'Answers for sends a PATCH; a typed question is asked; End session ends it and shows the saved answers',
+    'a typed question is asked; End session ends it and shows the saved answers',
     (tester) async {
       final fake = activeSession(exchanges: [liveExchangeJson()])
-        ..on('PATCH', _get, FakeReply.ok(liveViewJson(answerFor: 'neutral')))
         ..on(
           'POST',
           '$_get/end',
           FakeReply.ok(
             liveViewJson(
               status: 'ENDED',
-              answerFor: 'neutral',
               exchanges: [
                 liveExchangeJson(),
                 liveExchangeJson(
@@ -219,7 +231,6 @@ void main() {
                   order: 1,
                   question: 'Typed question?',
                   answer: 'Typed answer.',
-                  answerFor: 'neutral',
                 ),
               ],
             ),
@@ -229,11 +240,7 @@ void main() {
       // Saved earlier in this session.
       expect(find.text('What is a closure in JavaScript?'), findsOneWidget);
       expect(find.text('QUESTIONS · 1'), findsOneWidget);
-
-      await tester.tap(find.text('Neutral'));
-      await tester.pumpAndSettle();
-      expect(fake.requests.last.method, 'PATCH');
-      expect(fake.requests.last.body, {'answerFor': 'neutral'});
+      expect(find.text('Neutral'), findsNothing);
 
       await tester.enterText(find.byType(TextField), 'Typed question?');
       await tester.tap(find.byTooltip('Ask'));
@@ -255,12 +262,80 @@ void main() {
       expect(connector.last.closed, isTrue);
       expect(find.text('Session ended'), findsOneWidget);
       expect(find.text('2 questions answered'), findsOneWidget);
+      expect(fake.requests.where((r) => r.method == 'PATCH'), isEmpty);
       expect(find.text('Typed question?'), findsOneWidget);
       expect(_rich('Typed answer.'), findsOneWidget);
       expect(find.byType(TextField), findsNothing);
       expect(find.byKey(const ValueKey('live-mic')), findsNothing);
     },
   );
+
+  testWidgets(
+    'with a voiceprint, captions say who spoke and only the interviewer gets an answer',
+    (tester) async {
+      final fake = activeSession()
+        ..on('GET', _voice, FakeReply.ok(voiceProfileJson()))
+        ..on('GET', _model, FakeReply.ok(speakerModelJson()));
+      await open(tester, fake);
+      expect(find.byKey(const ValueKey('live-voice-hint')), findsNothing);
+
+      await tester.tap(find.byKey(const ValueKey('live-mic')));
+      await flush(tester);
+      final socket = connector.last;
+      mic.push([...tone(3000, ownerVoice), ...tone(3000, otherVoice)]);
+      await flush(tester);
+
+      socket
+        ..emit({'type': 'input_audio_buffer.speech_started', 'item_id': 'me', 'audio_start_ms': 100})
+        ..emit({'type': 'input_audio_buffer.speech_stopped', 'item_id': 'me', 'audio_end_ms': 2900})
+        ..emit({'type': 'input_audio_buffer.committed', 'item_id': 'me'})
+        ..emit({
+          'type': 'conversation.item.input_audio_transcription.completed',
+          'item_id': 'me',
+          'transcript': 'I worked on payments.',
+        })
+        ..emit({'type': 'input_audio_buffer.speech_started', 'item_id': 'them', 'audio_start_ms': 3100})
+        ..emit({'type': 'input_audio_buffer.speech_stopped', 'item_id': 'them', 'audio_end_ms': 5900})
+        ..emit({'type': 'input_audio_buffer.committed', 'item_id': 'them'})
+        ..emit({
+          'type': 'conversation.item.input_audio_transcription.completed',
+          'item_id': 'them',
+          'transcript': 'How did you test it?',
+        });
+      await flush(tester);
+      expect(socket.sentTypes.where((t) => t == 'response.create'), hasLength(1));
+      expect(find.text('You'), findsOneWidget);
+      expect(find.text('Interviewer'), findsOneWidget);
+      expect(find.text('I worked on payments.'), findsOneWidget);
+
+      socket
+        ..emit({'type': 'response.created', 'response': {'id': 'r1'}})
+        ..emit({'type': 'response.output_text.delta', 'response_id': 'r1', 'delta': 'With contract tests.'})
+        ..emit({'type': 'response.done', 'response': {'id': 'r1', 'status': 'completed'}});
+      await flush(tester);
+      expect(find.text('QUESTIONS · 1'), findsOneWidget);
+      // The caption and the card.
+      expect(find.text('How did you test it?'), findsNWidgets(2));
+      expect(
+        fake.requests.where((r) => r.path == '$_get/exchanges').single.body,
+        {'question': 'How did you test it?', 'answer': 'With contract tests.'},
+      );
+    },
+  );
+
+  testWidgets('the hint opens the voice setup', (tester) async {
+    final fake = activeSession()
+      ..on('GET', _model, FakeReply.ok(speakerModelJson()));
+    await open(tester, fake);
+    await tester.tap(find.widgetWithText(TextButton, 'Set up'));
+    await tester.pumpAndSettle();
+    expect(find.byType(VoiceSetupPage), findsOneWidget);
+    expect(find.textContaining('read three sentences'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.byType(VoiceSetupPage), findsNothing);
+    expect(find.text(liveVoiceHint), findsOneWidget);
+  });
 
   testWidgets('a past session shows its saved answers, read-only', (
     tester,
@@ -328,6 +403,8 @@ void main() {
         );
         await tester.pumpAndSettle();
 
+        expect(find.byKey(const ValueKey('live-voice-card')), findsOneWidget);
+        expect(find.text('Not set up'), findsOneWidget);
         expect(find.text('React, Node.js'), findsOneWidget);
         expect(find.text('Ended'), findsOneWidget);
         expect(find.textContaining('3 questions'), findsOneWidget);
@@ -352,7 +429,7 @@ void main() {
     );
 
     testWidgets(
-      'the new-session sheet sends technologies, title and answerFor',
+      'the new-session sheet sends technologies and title',
       (tester) async {
         tallScreen(tester);
         final fake = FakeApi()
@@ -391,8 +468,7 @@ void main() {
           find.widgetWithText(TextField, 'Title'),
           'Evening round',
         );
-        await tester.tap(find.text('Neutral'));
-        await tester.pump();
+        expect(find.text('Answers for'), findsNothing);
         await tester.tap(find.text('Start'));
         await tester.pumpAndSettle();
 
@@ -400,10 +476,70 @@ void main() {
         expect(post.body, {
           'technologies': ['React', 'Go'],
           'title': 'Evening round',
-          'answerFor': 'neutral',
         });
         // The API's refusal stays on the sheet.
         expect(find.text('Save your OpenAI key first.'), findsOneWidget);
+      },
+    );
+
+    testWidgets('the Your voice card opens the setup and shows when it is set up', (
+      tester,
+    ) async {
+      tallScreen(tester);
+      final fake = FakeApi()
+        ..on('GET', _base, const FakeReply.ok({'sessions': []}))
+        ..on('GET', _voice, FakeReply.ok(voiceProfileJson()))
+        ..on('GET', _model, FakeReply.ok(speakerModelJson()));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: LivePracticeListPage(
+              api: fake.client(),
+              voice: fakeVoiceRepo(fake.client()),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Set up'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('live-voice-card')));
+      await tester.pumpAndSettle();
+      expect(find.text('Your voice is set up'), findsOneWidget);
+    });
+
+    testWidgets(
+      'before the first session without a voiceprint, the voice setup comes first (once)',
+      (tester) async {
+        tallScreen(tester);
+        final cache = MemoryVoiceCache();
+        final fake = FakeApi()
+          ..on('GET', _base, const FakeReply.ok({'sessions': []}))
+          ..on('GET', '$_base/ready', const FakeReply.ok({'ready': true, 'reason': null}))
+          ..on('POST', _base, FakeReply(201, liveViewJson()))
+          ..on('GET', _model, FakeReply.ok(speakerModelJson()));
+        final voice = fakeVoiceRepo(fake.client(), cache: cache);
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: LivePracticeListPage(api: fake.client(), voice: voice),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('New live practice'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Start'));
+        await tester.pumpAndSettle();
+        expect(find.byType(VoiceSetupPage), findsOneWidget);
+        expect(cache.offered, isTrue);
+
+        await tester.tap(find.text('Not now'));
+        await tester.pumpAndSettle();
+        expect(find.byType(LivePracticePage), findsOneWidget);
+        expect(find.text(liveVoiceHint), findsOneWidget);
+        // Never offered on its own again.
+        expect(await voice.offerSetup(), isFalse);
       },
     );
 

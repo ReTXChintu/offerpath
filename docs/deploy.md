@@ -41,6 +41,15 @@ npx pm2 save && npx pm2 startup   # survive reboots (run the printed command wit
 | `FCM_SERVICE_ACCOUNT` | Optional: path to the Firebase service-account JSON, for phone push |
 | `EXECUTION_DRIVER` | `inline`, or `queue` with Redis and the `offerpath-sandbox` worker |
 
+Live practice's voice recognition needs its speaker model in the downloads folder, once. It isn't in git, and releases leave it alone:
+
+```bash
+mkdir -p apps/api/downloads/models
+curl -L -o apps/api/downloads/models/wespeaker_en_voxceleb_resnet34_LM.onnx \
+  https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/wespeaker_en_voxceleb_resnet34_LM.onnx
+sha256sum apps/api/downloads/models/*.onnx   # e9848563da86f263117134dfd7ad63c92355b37de492b55e325400c9d9c39012
+```
+
 Open both ports in the firewall. Check: `curl http://<ip>:50005/api/v1/health/live` prints `{"status":"ok"}` and the web app loads at `http://<ip>:50004/`.
 
 PM2 runs `offerpath-api`, `offerpath-web` (static files) and `offerpath-sandbox`, one instance each. Device presence and the hub live in memory, so never cluster the API. Day to day: `pnpm server:status | server:logs | server:restart | server:update`.

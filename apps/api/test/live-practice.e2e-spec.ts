@@ -1,3 +1,6 @@
+import { mkdir, rm, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+
 import { type INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { PrismaClient } from '@offerpath/database';
@@ -5,6 +8,7 @@ import request from 'supertest';
 
 import { AppModule } from '../src/app.module.js';
 import { ProblemDetailsFilter } from '../src/common/filters/problem-details.filter.js';
+import { DownloadsService } from '../src/modules/downloads/application/downloads.service.js';
 import { AiFallbackService } from '../src/modules/settings/application/ai-fallback.service.js';
 
 /**
@@ -133,8 +137,8 @@ describe('a session for a prep', () => {
     ).body;
     expect(pass).toMatchObject({
       clientSecret: 'ek_test_secret',
-      model: 'gpt-realtime',
-      url: 'wss://api.openai.com/v1/realtime?model=gpt-realtime',
+      model: 'gpt-realtime-2.1',
+      url: 'wss://api.openai.com/v1/realtime?model=gpt-realtime-2.1',
     });
     expect(Date.parse(pass.expiresAt)).toBeGreaterThan(Date.now());
 
@@ -142,17 +146,18 @@ describe('a session for a prep', () => {
     expect(expiresInSeconds).toBe(600);
     expect(session).toMatchObject({
       type: 'realtime',
-      model: 'gpt-realtime',
+      model: 'gpt-realtime-2.1',
       output_modalities: ['text'],
     });
     expect(session.audio.input.format).toEqual({ type: 'audio/pcm', rate: 24_000 });
     expect(session.audio.input.turn_detection).toMatchObject({
       type: 'server_vad',
-      create_response: true,
+      create_response: false,
       interrupt_response: false,
     });
+    expect(session.audio.input.noise_reduction).toEqual({ type: 'far_field' });
     expect(session.audio.input.transcription).toMatchObject({
-      model: 'gpt-4o-mini-transcribe',
+      model: 'gpt-transcribe',
       prompt: expect.stringContaining('PostgreSQL, Node.js'),
     });
     expect(session.instructions).toContain(CV);
@@ -237,4 +242,81 @@ it('runs without a prep, from technologies alone', async () => {
   });
   await http.delete(`/api/v1/live-practice/${created.body.id}`).set(auth()).expect(204);
   await http.get(`/api/v1/live-practice/${created.body.id}`).set(auth()).expect(404);
+});
+
+describe("the interviewee's voice", () => {
+  const embedding = Array.from({ length: 256 }, (_, i) => Math.sin(i) / 10);
+
+  it('is saved, tuned, replaced and removed', async () => {
+    await http.get('/api/v1/live-practice/voice').set(auth()).expect(404);
+    await http
+      .put('/api/v1/live-practice/voice')
+      .set(auth())
+      .send({ model: 'x.onnx', embedding: [0.1, 0.2] })
+      .expect(400);
+
+    const saved = (
+      await http
+        .put('/api/v1/live-practice/voice')
+        .set(auth())
+        .send({ model: 'wespeaker_en_voxceleb_resnet34_LM.onnx', embedding })
+        .expect(200)
+    ).body;
+    expect(saved).toMatchObject({
+      model: 'wespeaker_en_voxceleb_resnet34_LM.onnx',
+      threshold: 0.5,
+    });
+    expect(saved.embedding).toHaveLength(256);
+    expect(saved.embedding[1]).toBeCloseTo(embedding[1]!, 10);
+
+    const tuned = (
+      await http
+        .patch('/api/v1/live-practice/voice')
+        .set(auth())
+        .send({ threshold: 0.62 })
+        .expect(200)
+    ).body;
+    expect(tuned.threshold).toBe(0.62);
+    await http
+      .patch('/api/v1/live-practice/voice')
+      .set(auth())
+      .send({ threshold: 1.5 })
+      .expect(400);
+
+    const replaced = (
+      await http
+        .put('/api/v1/live-practice/voice')
+        .set(auth())
+        .send({ model: 'other.onnx', embedding: embedding.map((x) => -x), threshold: 0.4 })
+        .expect(200)
+    ).body;
+    expect(replaced).toMatchObject({ model: 'other.onnx', threshold: 0.4 });
+
+    await http.delete('/api/v1/live-practice/voice').set(auth()).expect(204);
+    await http.get('/api/v1/live-practice/voice').set(auth()).expect(404);
+  });
+});
+
+describe('the speaker model download', () => {
+  it('is public, with a checksum to verify it by', async () => {
+    const dir = path.join(app.get(DownloadsService).dir, 'models');
+    const file = path.join(dir, `test-${Date.now()}.onnx`);
+    await mkdir(dir, { recursive: true });
+    await writeFile(file, 'not really a model');
+    try {
+      const info = (await http.get('/api/v1/downloads/speaker-model').expect(200)).body;
+      expect(info).toEqual({
+        fileName: path.basename(file),
+        sizeBytes: 18,
+        // sha256 of "not really a model"
+        sha256: '29a6a9f19463c8e9c592d2f06fa009fe46e351b618667e95eac63df77c56f404',
+        url: '/api/v1/downloads/speaker-model/file',
+      });
+      const download = await http.get('/api/v1/downloads/speaker-model/file').expect(200);
+      expect(download.headers['content-disposition']).toContain(path.basename(file));
+      expect(Buffer.from(download.body as Buffer).toString()).toBe('not really a model');
+    } finally {
+      await rm(file, { force: true });
+    }
+  });
 });

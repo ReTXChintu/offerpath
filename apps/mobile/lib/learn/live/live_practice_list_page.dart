@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../models/live_practice.dart';
@@ -6,28 +8,41 @@ import '../../util/format.dart';
 import '../../widgets/common.dart';
 import '../ui.dart';
 import 'live_practice_page.dart';
+import 'voice_repository.dart';
+import 'voice_setup_page.dart';
 
 /// Where to add the OpenAI key: the phone has no AI settings of its own.
 const liveOpenAiKeyHint =
     'Add your OpenAI key in Settings → AI on the web or laptop app.';
 
-/// Opens a session's screen.
+/// Opens a session's screen. Before a new one ([autoStart]), the voice
+/// setup comes first when there's no voiceprint and it hasn't been offered
+/// on this phone yet.
 Future<void> openLivePractice(
   BuildContext context,
   ApiClient api,
   String sessionId, {
   LivePracticeView? initial,
   bool autoStart = false,
-}) => Navigator.of(context).push(
-  MaterialPageRoute<void>(
-    builder: (_) => LivePracticePage(
-      api: api,
-      sessionId: sessionId,
-      initial: initial,
-      autoStart: autoStart,
+  VoiceRepository? voice,
+}) async {
+  final repo = voice ?? VoiceRepository(api: api);
+  if (autoStart && await repo.offerSetup() && context.mounted) {
+    await openVoiceSetup(context, repo, beforeSession: true);
+  }
+  if (!context.mounted) return;
+  await Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => LivePracticePage(
+        api: api,
+        sessionId: sessionId,
+        initial: initial,
+        autoStart: autoStart,
+        voice: repo,
+      ),
     ),
-  ),
-);
+  );
+}
 
 /// Live practice can't start: says why and where to fix it.
 Future<void> showLiveNotReady(BuildContext context, String? reason) =>
@@ -50,20 +65,28 @@ Future<void> showLiveNotReady(BuildContext context, String? reason) =>
       ),
     );
 
-/// Learn > Live practice: past sessions (newest first) and "New live
-/// practice".
+/// Learn > Live practice: "Your voice", past sessions (newest first) and
+/// "New live practice".
 class LivePracticeListPage extends StatefulWidget {
-  const LivePracticeListPage({required this.api, super.key});
+  const LivePracticeListPage({required this.api, this.voice, super.key});
 
   final ApiClient api;
+
+  /// The user's voice (fakes in tests).
+  final VoiceRepository? voice;
 
   @override
   State<LivePracticeListPage> createState() => _LivePracticeListPageState();
 }
 
 class _LivePracticeListPageState extends State<LivePracticeListPage> {
+  late final VoiceRepository _voice =
+      widget.voice ?? VoiceRepository(api: widget.api);
   List<LivePracticeSummary>? _sessions;
   Object? _error;
+
+  /// Whether a voiceprint is saved; null while unknown.
+  bool? _voiceSetUp;
 
   @override
   void initState() {
@@ -71,7 +94,22 @@ class _LivePracticeListPageState extends State<LivePracticeListPage> {
     _load();
   }
 
+  Future<void> _loadVoice() async {
+    try {
+      final profile = await widget.api.getVoiceProfile();
+      if (mounted) setState(() => _voiceSetUp = profile != null);
+    } catch (_) {
+      // The card stays as it was.
+    }
+  }
+
+  Future<void> _openVoice() async {
+    await openVoiceSetup(context, _voice);
+    await _loadVoice();
+  }
+
   Future<void> _load() async {
+    unawaited(_loadVoice());
     try {
       final sessions = await widget.api.listLivePractice();
       if (!mounted) return;
@@ -98,12 +136,13 @@ class _LivePracticeListPageState extends State<LivePracticeListPage> {
       view.id,
       initial: view,
       autoStart: true,
+      voice: _voice,
     );
     await _load();
   }
 
   Future<void> _open(LivePracticeSummary s) async {
-    await openLivePractice(context, widget.api, s.id);
+    await openLivePractice(context, widget.api, s.id, voice: _voice);
     await _load();
   }
 
@@ -132,6 +171,8 @@ class _LivePracticeListPageState extends State<LivePracticeListPage> {
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 40),
         children: [
+          _VoiceCard(setUp: _voiceSetUp, onTap: _openVoice),
+          const SizedBox(height: 12),
           FilledButton.icon(
             onPressed: _new,
             icon: const Icon(Icons.mic),
@@ -153,8 +194,8 @@ class _LivePracticeListPageState extends State<LivePracticeListPage> {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    'Put the phone on the table and ask each other interview questions. '
-                    'It listens all the time, and whenever anyone asks a question, a direct answer shows up within seconds. '
+                    "Put the phone on the table: you're the interviewee and your partner is the interviewer. "
+                    'It listens all the time and knows your voice, so whenever the interviewer asks a question, a direct answer from your CV shows up within seconds. '
                     'Every question and answer is saved. Uses your own OpenAI key. For practice only, never for a real interview.',
                     style: TextStyle(
                       fontSize: 13,
@@ -171,6 +212,77 @@ class _LivePracticeListPageState extends State<LivePracticeListPage> {
               _SessionTile(session: s, onTap: () => _open(s)),
           ],
         ],
+      ),
+    );
+  }
+}
+
+/// "Your voice": set up or not; opens the voice setup.
+class _VoiceCard extends StatelessWidget {
+  const _VoiceCard({required this.setUp, required this.onTap});
+
+  final bool? setUp;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final tone = LearnTone.of(context);
+    final on = setUp == true;
+    return Material(
+      key: const ValueKey('live-voice-card'),
+      color: tone.card,
+      shape: RoundedRectangleBorder(
+        side: BorderSide(color: tone.line),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+          child: Row(
+            children: [
+              Icon(
+                Icons.record_voice_over,
+                color: on ? LearnTone.pass : tone.muted,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          'Your voice',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: tone.strong,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        if (setUp != null)
+                          Tag(
+                            on ? 'Set up' : 'Not set up',
+                            color: on ? LearnTone.pass : LearnTone.warn,
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      on
+                          ? "Only the interviewer's questions get answers. Test or record it again."
+                          : 'Set it up so only the interviewer gets answers.',
+                      style: TextStyle(fontSize: 12, color: tone.muted),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right, size: 20, color: tone.muted),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -246,9 +358,8 @@ class _SessionTile extends StatelessWidget {
   }
 }
 
-/// Starts a session from the Learn tab: optional technologies and title,
-/// and who the answers are for. Says so up front when no OpenAI key is
-/// saved. Pops with the new session.
+/// Starts a session from the Learn tab: optional technologies and title.
+/// Says so up front when no OpenAI key is saved. Pops with the new session.
 class NewLivePracticeSheet extends StatefulWidget {
   const NewLivePracticeSheet({required this.api, super.key});
 
@@ -263,7 +374,6 @@ class _NewLivePracticeSheetState extends State<NewLivePracticeSheet> {
   final _title = TextEditingController();
   final _tech = TextEditingController();
   final List<String> _techs = [];
-  AnswerFor _answerFor = AnswerFor.me;
   bool _starting = false;
   String? _error;
 
@@ -300,7 +410,6 @@ class _NewLivePracticeSheetState extends State<NewLivePracticeSheet> {
       final view = await widget.api.startLivePractice(
         technologies: _techs,
         title: _title.text,
-        answerFor: _answerFor,
       );
       if (mounted) Navigator.of(context).pop(view);
     } catch (error) {
@@ -397,32 +506,6 @@ class _NewLivePracticeSheetState extends State<NewLivePracticeSheet> {
                     hintText: 'Live practice',
                     border: OutlineInputBorder(),
                   ),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'Answers for',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: tone.muted,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                SegmentedButton<AnswerFor>(
-                  segments: const [
-                    ButtonSegment(
-                      value: AnswerFor.me,
-                      label: Text('Me (my CV/profile)'),
-                    ),
-                    ButtonSegment(
-                      value: AnswerFor.neutral,
-                      label: Text('Neutral'),
-                    ),
-                  ],
-                  selected: {_answerFor},
-                  showSelectedIcon: false,
-                  onSelectionChanged: (s) =>
-                      setState(() => _answerFor = s.first),
                 ),
                 if (_error != null) ...[
                   const SizedBox(height: 12),

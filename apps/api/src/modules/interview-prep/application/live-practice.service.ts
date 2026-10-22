@@ -2,7 +2,12 @@ import { Inject, Injectable } from '@nestjs/common';
 
 import { describeAIFailure, liveAnswererInstructions } from '@offerpath/ai';
 import type { AppConfig } from '@offerpath/config';
-import type { InterviewPrep, LivePracticeExchange, LivePracticeSession } from '@offerpath/database';
+import type {
+  InterviewPrep,
+  LivePracticeExchange,
+  LivePracticeSession,
+  LivePracticeVoice,
+} from '@offerpath/database';
 
 import { Problems } from '../../../common/http/problem-details.js';
 import { APP_CONFIG } from '../../../infrastructure/config/config.module.js';
@@ -49,6 +54,19 @@ export interface LivePracticeInput {
   technologies?: string[];
   title?: string | null;
   answerFor?: AnswerFor;
+}
+
+export interface VoiceProfile {
+  model: string;
+  embedding: number[];
+  threshold: number;
+  updatedAt: string;
+}
+
+export interface VoiceInput {
+  model: string;
+  embedding: number[];
+  threshold?: number;
 }
 
 export interface RealtimePass {
@@ -186,6 +204,46 @@ export class LivePracticeService {
     if (count === 0) throw Problems.notFound('Live practice session');
   }
 
+  // -- The interviewee's voice -------------------------------------------------------
+
+  /**
+   * The user's voiceprint, made on the phone: how it tells the interviewee
+   * (this user) from the interviewer. Kept here so it survives a reinstall.
+   */
+  async voice(userId: string): Promise<VoiceProfile> {
+    const voice = await this.prisma.livePracticeVoice.findUnique({ where: { userId } });
+    if (!voice) throw Problems.notFound('Voice profile');
+    return toVoiceView(voice);
+  }
+
+  async saveVoice(userId: string, input: VoiceInput): Promise<VoiceProfile> {
+    const data = {
+      model: input.model,
+      embedding: input.embedding,
+      ...(input.threshold !== undefined ? { threshold: input.threshold } : {}),
+    };
+    const voice = await this.prisma.livePracticeVoice.upsert({
+      where: { userId },
+      create: { userId, ...data },
+      update: data,
+    });
+    return toVoiceView(voice);
+  }
+
+  async setThreshold(userId: string, threshold: number): Promise<VoiceProfile> {
+    await this.voice(userId);
+    const voice = await this.prisma.livePracticeVoice.update({
+      where: { userId },
+      data: { threshold },
+    });
+    return toVoiceView(voice);
+  }
+
+  async deleteVoice(userId: string): Promise<void> {
+    const { count } = await this.prisma.livePracticeVoice.deleteMany({ where: { userId } });
+    if (count === 0) throw Problems.notFound('Voice profile');
+  }
+
   // -- The realtime session -------------------------------------------------------
 
   /** A short-lived pass for the phone to open the OpenAI Realtime session with. */
@@ -230,14 +288,17 @@ export class LivePracticeService {
                 model: this.config.env.OPENAI_TRANSCRIBE_MODEL,
                 prompt: vocabulary(session),
               },
-              // Answer when a question ends; a new question never cancels
-              // the answer still being written.
+              // Cuts the conversation into turns. The phone decides which
+              // turns get an answer (the interviewer's, by voice), so no
+              // automatic responses, and nothing interrupts one.
               turn_detection: {
                 type: 'server_vad',
                 silence_duration_ms: 700,
-                create_response: true,
+                create_response: false,
                 interrupt_response: false,
               },
+              // The phone lies on the table between two people.
+              noise_reduction: { type: 'far_field' },
             },
           },
         },
@@ -301,6 +362,15 @@ function assertActive(session: LivePracticeSession): void {
   if (session.status !== 'ACTIVE') {
     throw Problems.conflict('This session has ended. Start a new one to practise again.');
   }
+}
+
+function toVoiceView(voice: LivePracticeVoice): VoiceProfile {
+  return {
+    model: voice.model,
+    embedding: voice.embedding,
+    threshold: voice.threshold,
+    updatedAt: voice.updatedAt.toISOString(),
+  };
 }
 
 function toExchangeView(e: LivePracticeExchange): LiveExchangeView {

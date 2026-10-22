@@ -388,22 +388,19 @@ class ApiClient {
 
   /// Starts a session (for a prep, or for [technologies]). Fails with 400
   /// when no OpenAI key is saved.
-  Future<LivePracticeView> startLivePractice({String? prepId, List<String> technologies = const [], String? title, AnswerFor answerFor = AnswerFor.me}) async {
+  Future<LivePracticeView> startLivePractice({String? prepId, List<String> technologies = const [], String? title}) async {
     final t = title?.trim() ?? '';
     final techs = technologies.map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
     return _live(await post('/live-practice', body: {
       'prepId': ?prepId,
       if (techs.isNotEmpty) 'technologies': techs,
       if (t.isNotEmpty) 'title': t,
-      'answerFor': answerForValue(answerFor),
     }, timeout: const Duration(seconds: 60)));
   }
 
   Future<LivePracticeView> getLivePractice(String id) async => _live(await get(_livePath(id)));
 
-  /// A new [answerFor] needs a new realtime pass (and a reconnect).
-  Future<LivePracticeView> updateLivePractice(String id, {AnswerFor? answerFor, String? title}) async => _live(await patch(_livePath(id), body: {
-        if (answerFor != null) 'answerFor': answerForValue(answerFor),
+  Future<LivePracticeView> updateLivePractice(String id, {String? title}) async => _live(await patch(_livePath(id), body: {
         if (title != null && title.trim().isNotEmpty) 'title': title.trim(),
       }));
 
@@ -429,4 +426,58 @@ class ApiClient {
   Future<LivePracticeView> endLivePractice(String id) async => _live(await post('${_livePath(id)}/end', timeout: const Duration(seconds: 60)));
 
   Future<void> deleteLivePractice(String id) => delete(_livePath(id));
+
+  // -- Your voice (live practice) ---------------------------------------------
+
+  static VoiceProfile _voice(dynamic j) {
+    if (j is! Map) throw const ApiException(status: 0, type: 'bad-reply', title: 'Unexpected reply from the server.');
+    return VoiceProfile.fromJson(j.cast<String, dynamic>());
+  }
+
+  /// The speaker model the server hosts (a public route); null when it has
+  /// none.
+  Future<SpeakerModelInfo?> speakerModelInfo() async {
+    try {
+      final j = await get('/downloads/speaker-model');
+      if (j is! Map) throw const ApiException(status: 0, type: 'bad-reply', title: 'Unexpected reply from the server.');
+      return SpeakerModelInfo.fromJson(j.cast<String, dynamic>());
+    } on ApiException catch (e) {
+      if (e.status == 404) return null;
+      rethrow;
+    }
+  }
+
+  /// The user's voiceprint; null before one is saved.
+  Future<VoiceProfile?> getVoiceProfile() async {
+    try {
+      return _voice(await get('/live-practice/voice'));
+    } on ApiException catch (e) {
+      if (e.status == 404) return null;
+      rethrow;
+    }
+  }
+
+  /// Saves (replaces) the user's voiceprint, made with the speaker model [model].
+  Future<VoiceProfile> saveVoiceProfile({required String model, required List<double> embedding, double threshold = defaultVoiceThreshold}) async =>
+      _voice(await put('/live-practice/voice', body: {'model': model, 'embedding': embedding, 'threshold': threshold}));
+
+  Future<VoiceProfile> setVoiceThreshold(double threshold) async => _voice(await patch('/live-practice/voice', body: {'threshold': threshold}));
+
+  Future<void> deleteVoiceProfile() => delete('/live-practice/voice');
+
+  /// [url] as an absolute address: a server path (`/api/v1/...`) is on this
+  /// server.
+  String serverAddress(String url) {
+    if (url.startsWith(RegExp('https?://'))) return url;
+    return '$serverUrl${url.startsWith('/') ? '' : '/'}$url';
+  }
+
+  /// Downloads [url] (a server path or an absolute URL) to [savePath].
+  Future<void> downloadFile(String url, String savePath, {void Function(int received, int total)? onProgress}) async {
+    try {
+      await _dio.download(serverAddress(url), savePath, onReceiveProgress: onProgress, options: Options(receiveTimeout: const Duration(minutes: 2)));
+    } on DioException catch (e) {
+      throw translate(e);
+    }
+  }
 }

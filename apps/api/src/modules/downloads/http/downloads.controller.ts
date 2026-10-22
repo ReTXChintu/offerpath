@@ -13,6 +13,7 @@ import {
   MIME,
   type DownloadInfo,
   type Platform,
+  type SpeakerModelInfo,
 } from '../application/downloads.service.js';
 
 @ApiTags('downloads')
@@ -47,6 +48,26 @@ export class DownloadsController {
   @Get('downloads/windows')
   windows(@Res({ passthrough: true }) res: Response): Promise<StreamableFile> {
     return this.send('windows', res);
+  }
+
+  @Get('downloads/speaker-model')
+  @ApiOperation({ summary: "Live practice's on-device speaker model: name, size, sha256" })
+  async speakerModel(): Promise<SpeakerModelInfo> {
+    const model = await this.downloads.speakerModel(this.prefix);
+    if (!model) throw Problems.notFound('Speaker model');
+    return model.info;
+  }
+
+  @Get('downloads/speaker-model/file')
+  async speakerModelFile(@Res({ passthrough: true }) res: Response): Promise<StreamableFile> {
+    const model = await this.downloads.speakerModel(this.prefix);
+    if (!model) throw Problems.notFound('Speaker model');
+    res.set({
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': String(model.info.sizeBytes),
+      'Content-Disposition': `attachment; filename="${model.info.fileName}"`,
+    });
+    return new StreamableFile(createReadStream(model.fullPath));
   }
 
   /** The manifest Tauri's updater reads for in-app updates (signed installers only). */

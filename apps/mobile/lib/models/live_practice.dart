@@ -1,33 +1,23 @@
 /// Live practice: two people practise interviews face to face with the phone
-/// on the table. The phone streams the microphone to OpenAI Realtime (with a
-/// short-lived pass from the API) and shows a direct answer to every question
-/// as it's written; each question and answer is saved. Mirrors the API's
-/// types (`docs/live-practice.md`). Every field is read defensively: the
-/// server can be a version ahead of this app.
+/// on the table. The account owner is the interviewee; the phone recognises
+/// their voice on the device, streams the microphone to OpenAI Realtime (with
+/// a short-lived pass from the API) and shows a direct answer to every
+/// question the interviewer asks as it's written; each question and answer is
+/// saved. Mirrors the API's types (`docs/live-practice.md`). Every field is
+/// read defensively: the server can be a version ahead of this app.
 library;
 
 import '../services/api_client.dart';
 import 'json.dart';
 
-/// Who the answers are written for: the user (from the prep's CV, else the
-/// synced profile) or a neutral candidate (no CV).
+/// Who a saved answer was written for. The phone always gets answers for the
+/// user (from their CV) now; `neutral` only shows on exchanges saved before.
 enum AnswerFor { me, neutral }
 
 enum LiveStatus { active, ended }
 
 AnswerFor answerForOf(dynamic v) =>
     str(v).toLowerCase() == 'neutral' ? AnswerFor.neutral : AnswerFor.me;
-
-/// The wire value: `me` | `neutral`.
-String answerForValue(AnswerFor a) => switch (a) {
-  AnswerFor.me => 'me',
-  AnswerFor.neutral => 'neutral',
-};
-
-String answerForLabel(AnswerFor a) => switch (a) {
-  AnswerFor.me => 'Me',
-  AnswerFor.neutral => 'Neutral',
-};
 
 LiveStatus liveStatusOf(dynamic v) =>
     str(v).toUpperCase() == 'ENDED' ? LiveStatus.ended : LiveStatus.active;
@@ -203,4 +193,76 @@ class RealtimePass {
 
   /// The secret must be used to connect before then.
   final DateTime? expiresAt;
+}
+
+/// The match threshold a new voiceprint gets.
+const defaultVoiceThreshold = 0.5;
+
+/// `GET /live-practice/voice`: the user's voiceprint, the average of the
+/// speaker model's embeddings of three sentences they read. A turn whose
+/// embedding is at least [threshold] similar (cosine) is the user's.
+class VoiceProfile {
+  const VoiceProfile({
+    required this.model,
+    required this.embedding,
+    required this.threshold,
+    this.updatedAt,
+  });
+
+  factory VoiceProfile.fromJson(Map<String, dynamic> j) {
+    final raw = j['embedding'];
+    return VoiceProfile(
+      model: str(j['model']),
+      embedding: raw is List
+          ? raw.map(doubleOrNull).whereType<double>().toList()
+          : const [],
+      threshold: doubleOrNull(j['threshold']) ?? defaultVoiceThreshold,
+      updatedAt: dateOf(j['updatedAt']),
+    );
+  }
+
+  /// The speaker model's file name; a different model means recording again.
+  final String model;
+  final List<double> embedding;
+
+  /// 0-1: at or above it, a turn is the user's.
+  final double threshold;
+  final DateTime? updatedAt;
+
+  Map<String, Object?> toJson() => {
+    'model': model,
+    'embedding': embedding,
+    'threshold': threshold,
+    'updatedAt': updatedAt?.toIso8601String(),
+  };
+}
+
+/// `GET /downloads/speaker-model`: the speaker model the server hosts.
+class SpeakerModelInfo {
+  const SpeakerModelInfo({
+    required this.fileName,
+    required this.sizeBytes,
+    required this.sha256,
+    required this.url,
+  });
+
+  factory SpeakerModelInfo.fromJson(Map<String, dynamic> j) {
+    final url = str(j['url']).trim();
+    return SpeakerModelInfo(
+      fileName: str(j['fileName']),
+      sizeBytes: intOf(j['sizeBytes']),
+      sha256: str(j['sha256']).trim().toLowerCase(),
+      url: url.isNotEmpty ? url : '/api/v1/downloads/speaker-model/file',
+    );
+  }
+
+  /// E.g. `wespeaker_en_voxceleb_resnet34_LM.onnx`; a voice profile names it.
+  final String fileName;
+  final int sizeBytes;
+
+  /// Hex, lower case.
+  final String sha256;
+
+  /// A server path (`/api/v1/downloads/speaker-model/file`).
+  final String url;
 }

@@ -6,14 +6,12 @@ import 'dart:typed_data';
 import 'package:record/record.dart';
 import 'package:web_socket_channel/io.dart';
 
-import '../../models/live_practice.dart';
-
 /// Live practice talks to OpenAI Realtime directly (`docs/live-practice.md`):
 /// the phone streams the microphone up a WebSocket and OpenAI streams the
 /// answers back. This file has the two pieces of hardware behind interfaces
 /// (the socket and the microphone, so tests can use fakes), the events the
 /// phone sends, and [LiveConversation], which turns OpenAI's events into
-/// question-and-answer cards.
+/// captions and question-and-answer cards.
 
 /// One open connection to OpenAI Realtime.
 abstract interface class RealtimeSocket {
@@ -125,19 +123,27 @@ Map<String, Object?> appendAudioEvent(List<int> pcm) => {
   'audio': base64Encode(pcm),
 };
 
+/// Asks for an answer. The session never answers by itself
+/// (`create_response: false`): the phone sends this for the interviewer's
+/// turns only.
+const Map<String, Object?> responseCreateEvent = {'type': 'response.create'};
+
+/// A typed question as a user item.
+Map<String, Object?> typedQuestionItem(String text) => {
+  'type': 'conversation.item.create',
+  'item': {
+    'type': 'message',
+    'role': 'user',
+    'content': [
+      {'type': 'input_text', 'text': text},
+    ],
+  },
+};
+
 /// A typed question: the user item, then a request for the answer.
 List<Map<String, Object?>> typedQuestionEvents(String text) => [
-  {
-    'type': 'conversation.item.create',
-    'item': {
-      'type': 'message',
-      'role': 'user',
-      'content': [
-        {'type': 'input_text', 'text': text},
-      ],
-    },
-  },
-  {'type': 'response.create'},
+  typedQuestionItem(text),
+  responseCreateEvent,
 ];
 
 /// The loudness of a stretch of PCM16 audio, 0 (silence, -60 dBFS and
@@ -180,11 +186,18 @@ enum LiveSpeech {
 
 enum LiveSaveState { none, saving, saved, failed }
 
+/// Who spoke a turn. The account owner is the interviewee for the whole
+/// session; every other voice is the interviewer.
+enum LiveRole { interviewer, interviewee }
+
 /// One spoken (or typed) turn: a user item in OpenAI's conversation.
 class LiveTurn {
-  LiveTurn({this.itemId, this.text = '', this.done = false});
+  LiveTurn({this.itemId, this.text = '', this.done = false, this.role});
 
   final String? itemId;
+
+  /// Null while it isn't known yet (the voice check is running).
+  LiveRole? role;
 
   /// The transcript so far.
   String text;
@@ -195,11 +208,10 @@ class LiveTurn {
 
 /// One answer on screen, and the turns it answers.
 class LiveCard {
-  LiveCard({required this.id, required this.answerFor, this.responseId});
+  LiveCard({required this.id, this.responseId});
 
   /// Local; unique on this screen.
   final String id;
-  final AnswerFor answerFor;
   final String? responseId;
   final List<LiveTurn> turns = [];
   String answer = '';
@@ -228,17 +240,18 @@ class LiveCard {
   bool get hasAnswer => !isNotAQuestion(answer);
 }
 
-/// Turns OpenAI Realtime's server events into cards. Every turn OpenAI
-/// answers becomes a card once its answer has real text; a reply of exactly
-/// `-` (not a question) never shows. A finished card goes to [onFinished]
-/// (to be saved) when its question's transcript is in, or after
-/// [transcriptWait] with what was heard so far.
+/// Turns OpenAI Realtime's server events into captions and cards. Every
+/// answer becomes a card once it has real text; a reply of exactly `-` (not a
+/// question) never shows. A card's question is the turns its answer was asked
+/// for ([expectAnswer]), else the interviewer's turns nobody answered yet. A
+/// finished card goes to [onFinished] (to be saved) when its question's
+/// transcript is in, or after [transcriptWait] with what was heard so far.
 class LiveConversation {
   LiveConversation({
     required this.onChanged,
     required this.onFinished,
     required this.onError,
-    this.answerFor = AnswerFor.me,
+    this.checksSpeakers = false,
     this.transcriptWait = const Duration(seconds: 3),
   });
 
@@ -250,8 +263,10 @@ class LiveConversation {
   final void Function(String message, String? code) onError;
   final Duration transcriptWait;
 
-  /// Written on new cards.
-  AnswerFor answerFor;
+  /// Whose voice each spoken turn is gets decided outside ([setRole]); until
+  /// then a turn's role is unknown. Without it every turn is the
+  /// interviewer's.
+  final bool checksSpeakers;
 
   /// Oldest first, including cards with nothing to show yet.
   final List<LiveCard> cards = [];
@@ -262,8 +277,15 @@ class LiveConversation {
 
   final Map<String, LiveTurn> _turns = {};
 
+  /// Spoken turns, oldest first (the last [_keepLines]).
+  final List<LiveTurn> _lines = [];
+  static const _keepLines = 100;
+
   /// Turns that no response has picked up yet.
   final List<LiveTurn> _waiting = [];
+
+  /// The turns of each answer asked for and not started yet, in order.
+  final List<List<LiveTurn>> _expected = [];
   final Map<String, LiveCard> _byResponse = {};
   final Map<LiveCard, Timer> _waits = {};
   LiveCard? _current;
@@ -275,6 +297,39 @@ class LiveConversation {
 
   /// An answer is being written now.
   bool get answering => _current != null;
+
+  /// What's been said, oldest first: spoken turns with words.
+  List<LiveTurn> get transcript =>
+      _lines.where((t) => t.text.trim().isNotEmpty).toList();
+
+  /// The spoken turn [itemId] (created when it's new).
+  LiveTurn? turn(Object? itemId) => _turnFor(itemId);
+
+  /// Who spoke [itemId]. The interviewee's turns are never answered.
+  void setRole(Object? itemId, LiveRole role) {
+    final turn = _turnFor(itemId);
+    if (turn == null || turn.role == role) return;
+    turn.role = role;
+    if (role == LiveRole.interviewee) {
+      _waiting.remove(turn);
+      if (speech == LiveSpeech.thinking && _current == null) {
+        speech = LiveSpeech.quiet;
+      }
+    }
+    onChanged();
+  }
+
+  /// An answer was asked for [turns]: the next response is theirs.
+  void expectAnswer(List<LiveTurn> turns) {
+    _expected.add(turns);
+    for (final t in turns) {
+      _waiting.remove(t);
+    }
+  }
+
+  /// The last answer asked for was refused: its turns, to ask again.
+  List<LiveTurn> withdrawExpected() =>
+      _expected.isEmpty ? const [] : _expected.removeLast();
 
   /// One message from the socket.
   void handle(String raw) {
@@ -363,9 +418,12 @@ class LiveConversation {
     onChanged();
   }
 
-  /// A typed question; the next response answers it.
-  void addTyped(String text) {
-    _waiting.add(LiveTurn(text: text, done: true));
+  /// A typed question (always the interviewer's); the next response
+  /// answers it unless it's asked for with [expectAnswer].
+  LiveTurn addTyped(String text) {
+    final turn = LiveTurn(text: text, done: true, role: LiveRole.interviewer);
+    _waiting.add(turn);
+    return turn;
   }
 
   /// The connection dropped: an answer being written is kept as it is (and
@@ -377,6 +435,7 @@ class LiveConversation {
       if (!card.answerDone) _complete(card);
     }
     _waiting.clear();
+    _expected.clear();
     speech = LiveSpeech.quiet;
     onChanged();
   }
@@ -402,9 +461,14 @@ class LiveConversation {
     if (itemId is! String || itemId.isEmpty) return null;
     final known = _turns[itemId];
     if (known != null) return known;
-    final turn = LiveTurn(itemId: itemId);
+    final turn = LiveTurn(
+      itemId: itemId,
+      role: checksSpeakers ? null : LiveRole.interviewer,
+    );
     _turns[itemId] = turn;
     _waiting.add(turn);
+    _lines.add(turn);
+    if (_lines.length > _keepLines) _lines.removeAt(0);
     return turn;
   }
 
@@ -433,9 +497,16 @@ class LiveConversation {
   void _onResponseCreated(Object? response) {
     final id = response is Map ? response['id']?.toString() : null;
     if (id != null && _byResponse.containsKey(id)) return;
-    final card = LiveCard(id: 'c${_n++}', answerFor: answerFor, responseId: id);
-    card.turns.addAll(_waiting);
-    _waiting.clear();
+    final card = LiveCard(id: 'c${_n++}', responseId: id);
+    if (_expected.isNotEmpty) {
+      card.turns.addAll(_expected.removeAt(0));
+    } else {
+      final turns = _waiting
+          .where((t) => t.role == LiveRole.interviewer)
+          .toList();
+      card.turns.addAll(turns);
+      _waiting.removeWhere(turns.contains);
+    }
     if (id != null) _byResponse[id] = card;
     _current = card;
     cards.add(card);
