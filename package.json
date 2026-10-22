@@ -1,7 +1,7 @@
 {
   "name": "offerpath",
   "private": true,
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Offerpath - finds the jobs, gets you ready for the interviews, and moves you one step closer to the offer every day.",
   "packageManager": "pnpm@12.9.1",
   "engines": {
