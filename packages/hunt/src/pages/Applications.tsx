@@ -11,6 +11,7 @@ import { useMemo, useState } from 'react';
 
 import { useHuntNavigator } from '../client';
 import { ErrorBanner, HuntStatusBadge, InfoBanner, LocationFilter } from '../components/common';
+import { isBulkRejectable, RejectAllButton } from '../components/RejectAllButton';
 import { filterApplications, locationOptions, timeAgo } from '../logic';
 import { useAgentStatus, useApplications, useCheckInbox, useRuns, useSettings } from '../queries';
 import type { ApplicationStatus } from '../types';
@@ -44,6 +45,18 @@ export function ApplicationsPage() {
     return filterApplications(apps.data ?? [], b?.statuses, query, location);
   }, [apps.data, bucket, query, location]);
   const places = useMemo(() => locationOptions((apps.data ?? []).map((i) => i.job)), [apps.data]);
+  // "Reject all" takes the shown applications that wait on you, never hidden ones.
+  const waiting = useMemo(
+    () =>
+      items
+        .filter((i) => isBulkRejectable(i.application.status))
+        .map((i) => ({
+          id: i.application.id,
+          label: `${i.job.title} at ${i.job.company}`,
+          status: i.application.status,
+        })),
+    [items],
+  );
   const awaiting = (apps.data ?? []).filter(
     (i) => i.application.status === 'READY_FOR_REVIEW',
   ).length;
@@ -139,6 +152,13 @@ export function ApplicationsPage() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
+        {bucket === 'PENDING' ? (
+          <RejectAllButton
+            kind="applications"
+            targets={waiting}
+            skipped={items.length - waiting.length}
+          />
+        ) : null}
       </div>
       {items.length === 0 ? (
         <EmptyState

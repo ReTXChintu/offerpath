@@ -15,6 +15,7 @@ import { useMemo, useState } from 'react';
 import { useHuntNavigator } from '../client';
 import { ErrorBanner, HuntStatusBadge, LocationFilter } from '../components/common';
 import { JobLinkDialog } from '../components/JobLinkDialog';
+import { isBulkRejectable, RejectAllButton } from '../components/RejectAllButton';
 import { SharedJobDialog } from '../components/SharedJobDialog';
 import {
   filterJobs,
@@ -50,6 +51,18 @@ export function JobsPage() {
     [jobs.data, location],
   );
   const places = useMemo(() => locationOptions((jobs.data ?? []).map((i) => i.job)), [jobs.data]);
+  // "Reject all" takes the shown jobs that wait on you, never hidden ones.
+  const waiting = useMemo(
+    () =>
+      items
+        .filter((i) => isBulkRejectable(i.job.status))
+        .map((i) => ({
+          id: i.job.id,
+          label: `${i.job.title} at ${i.job.company}`,
+          status: i.job.status,
+        })),
+    [items],
+  );
   const huntSource = huntPosts.isPending ? huntPosts.variables?.sources?.[0] : undefined;
 
   return (
@@ -154,6 +167,9 @@ export function JobsPage() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
+        {filter === 'AWAITING_APPROVAL' || filter === 'MANUAL_ACTION' ? (
+          <RejectAllButton kind="jobs" targets={waiting} skipped={items.length - waiting.length} />
+        ) : null}
       </div>
       {items.length === 0 ? (
         <EmptyState
