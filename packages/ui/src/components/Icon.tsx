@@ -162,6 +162,12 @@ const PATHS = {
     '<path d="M9 6.5v11M15 6.5v11M6.5 9h11M6.5 15h11"/><path d="M9 6.5a2.5 2.5 0 1 0-2.5 2.5M15 6.5a2.5 2.5 0 1 1 2.5 2.5M9 17.5a2.5 2.5 0 1 1-2.5-2.5M15 17.5a2.5 2.5 0 1 0 2.5-2.5"/>',
   upload:
     '<path d="M12 16.5v-13"/><polyline points="6.5 9 12 3.5 17.5 9"/><line x1="4" y1="20.5" x2="20" y2="20.5"/>',
+  arrowUp: '<line x1="12" y1="20" x2="12" y2="5"/><polyline points="6 11 12 5 18 11"/>',
+  arrowDown: '<line x1="12" y1="4" x2="12" y2="19"/><polyline points="6 13 12 19 18 13"/>',
+  grip: '<circle cx="9" cy="6" r="1.1"/><circle cx="15" cy="6" r="1.1"/><circle cx="9" cy="12" r="1.1"/><circle cx="15" cy="12" r="1.1"/><circle cx="9" cy="18" r="1.1"/><circle cx="15" cy="18" r="1.1"/>',
+  // A web page with a hero and cards: the portfolio site.
+  layout:
+    '<rect x="3" y="3.5" width="18" height="17" rx="2"/><path d="M3 8h18"/><rect x="6" y="11" width="12" height="3" rx="0.8"/><path d="M6 17h5M13 17h5"/>',
 } as const;
 
 export type IconName = keyof typeof PATHS;

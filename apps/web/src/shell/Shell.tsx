@@ -1,5 +1,6 @@
 import { useApplications } from '@offerpath/hunt';
 import { DesktopOfflineStrip, useOnboardingStatus } from '@offerpath/learn';
+import { usePortfolioUnread } from '@offerpath/portfolio';
 import {
   AppShell,
   CommandPalette,
@@ -26,6 +27,7 @@ import {
   GROW,
   HUNT,
   NEW_PREP,
+  PORTFOLIO,
   PROGRESS,
   SETTINGS,
   TODAY,
@@ -107,6 +109,7 @@ function Item({ entry, path, badge }: { entry: NavEntry; path: string; badge?: n
 
 function WebSidebar({ path }: { path: string }) {
   const waiting = useWaitingCount();
+  const unread = usePortfolioUnread();
   const { auth } = useAuth();
   return (
     <Sidebar
@@ -144,6 +147,7 @@ function WebSidebar({ path }: { path: string }) {
         ))}
       </NavGroup>
       <div className="app-nav-group">
+        <Item entry={PORTFOLIO} path={path} badge={unread} />
         <Item entry={PROGRESS} path={path} />
       </div>
     </Sidebar>
@@ -204,6 +208,7 @@ function WebCommandPalette({
       ...GROW.map((e) => go(e, 'Grow')),
       go(NEW_PREP, 'Grow'),
       ...HUNT.map((e) => go(e, 'Hunt')),
+      go(PORTFOLIO, 'Go to'),
       go(PROGRESS, 'Go to'),
       go(SETTINGS, 'Go to'),
       go(GET_APPS, 'Go to'),

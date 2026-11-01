@@ -18,6 +18,7 @@ import {
   RoadmapPage,
   Technologies,
 } from '@offerpath/learn';
+import { PortfolioPage } from '@offerpath/portfolio';
 import {
   createHashHistory,
   createRootRoute,
@@ -40,6 +41,7 @@ import {
   TechnologyRoute,
 } from './learn';
 import { DesktopToday } from './pages/Today';
+import { PortfolioTabRoute } from './portfolio';
 import { ApplicationReviewRoute, JobDetailRoute, SettingsRoute, SetupRoute } from './routes';
 import { Shell } from './shell/Shell';
 
@@ -76,6 +78,9 @@ const routeTree = rootRoute.addChildren([
   learn('/mock-interview/$interviewId', MockInterviewRoute),
   learn('/progress', DesktopProgress),
   learn('/onboarding', Onboarding),
+  // The portfolio site's content (docs/portfolio.md): one path per tab.
+  learn('/portfolio', PortfolioPage),
+  learn('/portfolio/$tab', PortfolioTabRoute),
   // Hunt: @offerpath/hunt's pages over the Tauri client.
   page('/hunt', DashboardPage),
   page('/jobs', JobsPage),

@@ -48,8 +48,13 @@ export function assertCollection(name: string): asserts name is SyncedCollection
  * Each write tells the account's phones what changed, and a new notification
  * is pushed to them at once.
  */
+/** Told after a synced document is written or deleted. */
+export type SyncListener = (userId: string, collection: SyncedCollection, id: string) => void;
+
 @Injectable()
 export class SyncService {
+  private readonly listeners = new Set<SyncListener>();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly hub: HubService,
@@ -70,6 +75,23 @@ export class SyncService {
 
     this.hub.pushToMobiles(userId, 'changed', { collections: [collection] });
     if (collection === 'notifications') this.announce(userId, body);
+    this.notify(userId, collection, id);
+  }
+
+  /** Other modules follow the desktop's data (the portfolio's drafts); returns unsubscribe. */
+  onChange(listener: SyncListener): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  private notify(userId: string, collection: SyncedCollection, id: string): void {
+    for (const listener of this.listeners) {
+      try {
+        listener(userId, collection, id);
+      } catch {
+        // A listener's failure is its own.
+      }
+    }
   }
 
   async delete(userId: string, collection: string, id: string): Promise<void> {
@@ -79,6 +101,7 @@ export class SyncService {
       data: { deletedAt: new Date() },
     });
     this.hub.pushToMobiles(userId, 'changed', { collections: [collection] });
+    this.notify(userId, collection, id);
   }
 
   async fetchAll(userId: string, collection: string): Promise<JsonDoc[]> {

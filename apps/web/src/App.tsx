@@ -5,13 +5,14 @@ import {
   type HuntNavigator,
 } from '@offerpath/hunt';
 import { LearnProvider, type LearnNavigator } from '@offerpath/learn';
+import { PortfolioProvider } from '@offerpath/portfolio';
 import { UiProvider } from '@offerpath/ui';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider, type RouterHistory } from '@tanstack/react-router';
 import { useEffect, useMemo, useState } from 'react';
 
 import { AuthContext } from './auth-context';
-import { apiBaseUrl } from './config';
+import { apiBaseUrl, apiOrigin } from './config';
 import { httpHuntClient } from './hunt-client';
 import { AuthPage } from './pages/AuthPage';
 import { createAppRouter } from './router';
@@ -105,12 +106,16 @@ function SignedIn({
     [router],
   );
   const authValue = useMemo(() => ({ auth, session, baseUrl }), [auth, session, baseUrl]);
+  // The portfolio's public URL is the API's own origin plus its path.
+  const portfolioOrigin = useMemo(() => apiOrigin(baseUrl), [baseUrl]);
 
   return (
     <AuthContext.Provider value={authValue}>
       <HuntProvider client={hunt} navigator={huntNavigator}>
         <LearnProvider client={auth.client} navigator={learnNavigator} surface="web">
-          <RouterProvider router={router} />
+          <PortfolioProvider apiOrigin={portfolioOrigin}>
+            <RouterProvider router={router} />
+          </PortfolioProvider>
         </LearnProvider>
       </HuntProvider>
     </AuthContext.Provider>

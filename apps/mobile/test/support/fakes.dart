@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:offerpath_mobile/models/app_notification.dart';
 import 'package:offerpath_mobile/models/envelope.dart';
 import 'package:offerpath_mobile/state/connection_controller.dart';
 
@@ -23,6 +24,13 @@ class FakeConnectionController extends ConnectionController {
 
   @override
   Stream<ChangedUpdate> get changed => _changed.stream;
+
+  /// `notification` frames a test pushes as if the hub sent them.
+  final _notifications = StreamController<AppNotification>.broadcast();
+  void pushNotification(AppNotification n) => _notifications.add(n);
+
+  @override
+  Stream<AppNotification> get notifications => _notifications.stream;
 
   @override
   Future<RelayResponse> request(String type, [Map<String, dynamic> payload = const {}]) async {

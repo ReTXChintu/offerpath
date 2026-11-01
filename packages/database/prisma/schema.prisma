@@ -46,6 +46,7 @@ model User {
   mockInterviews    MockInterview[]
   livePractice      LivePracticeSession[]
   liveVoice         LivePracticeVoice?
+  portfolio         Portfolio?
   conceptChats      ConceptChatMessage[]
   questionAnswers   ConceptQuestionAnswer[]
   assignments       PracticeAssignment[]
@@ -1695,4 +1696,153 @@ model LivePracticeVoice {
   updatedAt DateTime @updatedAt
 
   @@map("live_practice_voices")
+}
+
+/// A user's portfolio: its content is edited in Offerpath and read by any
+/// portfolio site from the public API. See docs/portfolio.md.
+model Portfolio {
+  id               String   @id @default(cuid())
+  userId           String   @unique
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Public name in the API path: /public/portfolio/<handle>/site.
+  handle           String   @unique
+  heroName         String   @default("")
+  heroEyebrow      String   @default("")
+  roles            String[] @default([])
+  heroBio          String   @default("")
+  resumeUrl        String   @default("")
+  aboutHeadline    String   @default("")
+  aboutParagraphs  String[] @default([])
+  socialGithub     String   @default("")
+  socialLinkedin   String   @default("")
+  socialTwitter    String   @default("")
+  socialEmail      String   @default("")
+  cloudinaryCloud  String?
+  cloudinaryKey    String?
+  /// Encrypted with ENCRYPTION_KEY.
+  cloudinarySecret String?
+  /// Profile items the user deleted from the portfolio: "projects:<id>", ...
+  dismissedSources String[] @default([])
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  projects       PortfolioProject[]
+  skillGroups    PortfolioSkillGroup[]
+  experience     PortfolioExperience[]
+  developerTools PortfolioDeveloperTool[]
+  messages       PortfolioMessage[]
+
+  @@map("portfolios")
+}
+
+model PortfolioProject {
+  id               String    @id @default(cuid())
+  portfolioId      String
+  portfolio        Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  title            String
+  desc             String
+  tags             String[]  @default([])
+  accent           String    @default("#818cf8")
+  gradientFrom     String    @default("#4f46e5")
+  gradientTo       String    @default("#0ea5e9")
+  imageUrl         String?
+  liveUrl          String    @default("")
+  githubUrl        String    @default("")
+  domain           String    @default("")
+  order            Int       @default(0)
+  published        Boolean   @default(false)
+  /// The profile item it came from: "projects", "experiences" or "skills".
+  sourceCollection String?
+  sourceId         String?
+  followsSource    Boolean   @default(false)
+  /// The project's folder on the user's laptop, for mockups.
+  localPath        String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([portfolioId, order])
+  @@map("portfolio_projects")
+}
+
+model PortfolioSkillGroup {
+  id               String    @id @default(cuid())
+  portfolioId      String
+  portfolio        Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  cat              String
+  items            String[]  @default([])
+  order            Int       @default(0)
+  published        Boolean   @default(false)
+  sourceCollection String?
+  sourceId         String?
+  followsSource    Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([portfolioId, order])
+  @@map("portfolio_skill_groups")
+}
+
+model PortfolioExperience {
+  id               String    @id @default(cuid())
+  portfolioId      String
+  portfolio        Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  title            String
+  company          String
+  period           String
+  bullets          String[]  @default([])
+  order            Int       @default(0)
+  published        Boolean   @default(false)
+  sourceCollection String?
+  sourceId         String?
+  followsSource    Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([portfolioId, order])
+  @@map("portfolio_experience")
+}
+
+model PortfolioDeveloperTool {
+  id               String    @id @default(cuid())
+  portfolioId      String
+  portfolio        Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  title            String
+  slug             String
+  shortDescription String
+  fullDescription  String    @default("")
+  domain           String    @default("Developer Tooling")
+  techStacks       String[]  @default([])
+  accent           String    @default("#818cf8")
+  gradientFrom     String    @default("#4f46e5")
+  gradientTo       String    @default("#0ea5e9")
+  githubUrl        String    @default("")
+  npmUrl           String    @default("")
+  docsUrl          String    @default("")
+  demoUrl          String    @default("")
+  installCommand   String    @default("")
+  packageName      String    @default("")
+  version          String    @default("")
+  featured         Boolean   @default(false)
+  published        Boolean   @default(false)
+  sortOrder        Int       @default(0)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@unique([portfolioId, slug])
+  @@map("portfolio_developer_tools")
+}
+
+/// A message from the portfolio's contact form.
+model PortfolioMessage {
+  id          String    @id @default(cuid())
+  portfolioId String
+  portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  name        String
+  email       String
+  message     String
+  read        Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+
+  @@index([portfolioId, createdAt])
+  @@map("portfolio_messages")
 }

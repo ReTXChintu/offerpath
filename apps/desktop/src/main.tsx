@@ -1,5 +1,6 @@
 import '@offerpath/ui/styles.css';
 import '@offerpath/learn/styles.css';
+import '@offerpath/portfolio/styles.css';
 import './monaco';
 
 import { StrictMode } from 'react';

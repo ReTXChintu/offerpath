@@ -11,6 +11,7 @@ import {
   useSyncStatus,
   useUpdateCheck,
 } from '@offerpath/hunt';
+import { usePortfolioUnread } from '@offerpath/portfolio';
 import {
   AppShell,
   CommandPalette,
@@ -35,6 +36,7 @@ import {
   GROW,
   HUNT,
   MORE,
+  PORTFOLIO,
   PROGRESS,
   TODAY,
   isActive,
@@ -94,6 +96,9 @@ function AppSidebar({ path }: { path: string }) {
   const dashboard = useDashboard();
   const about = useAboutInfo();
   const update = useUpdateCheck();
+  const sync = useSyncStatus();
+  // The portfolio lives in the account: ask only once this desktop is signed in.
+  const unread = usePortfolioUnread({ enabled: !!sync.data?.configured });
   const d = dashboard.data;
   // Applications waiting for the user: approvals plus questions / manual steps.
   const waiting = d ? d.total.awaitingApproval + d.total.manualAction + d.total.waitingForUser : 0;
@@ -137,6 +142,7 @@ function AppSidebar({ path }: { path: string }) {
         ))}
       </NavGroup>
       <div className="app-nav-group">
+        <Item entry={PORTFOLIO} path={path} badge={unread} />
         <Item entry={PROGRESS} path={path} />
       </div>
     </Sidebar>
@@ -219,6 +225,7 @@ function AppCommandPalette({
       go(TODAY, 'Go to'),
       ...GROW.items.map((e) => go(e, 'Grow')),
       ...HUNT.items.map((e) => go(e, 'Hunt')),
+      go(PORTFOLIO, 'Go to'),
       go(PROGRESS, 'Go to'),
       ...BOTTOM.map((e) => go(e, 'Go to')),
       ...MORE.map((e) => go(e, 'More')),

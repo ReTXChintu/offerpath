@@ -7,6 +7,7 @@ import '../models/envelope.dart';
 import '../models/interview_prep.dart';
 import '../models/live_practice.dart';
 import '../models/mock_interview.dart';
+import '../models/portfolio.dart';
 
 /// What the phone shows when an AI answer needs the desktop and it's off.
 const desktopOfflineAiMessage = "Your desktop is offline: AI answers come back when it's on";
@@ -464,6 +465,48 @@ class ApiClient {
   Future<VoiceProfile> setVoiceThreshold(double threshold) async => _voice(await patch('/live-practice/voice', body: {'threshold': threshold}));
 
   Future<void> deleteVoiceProfile() => delete('/live-practice/voice');
+
+  // -- Portfolio ----------------------------------------------------------------
+
+  static List<Map<String, dynamic>> _items(dynamic j) {
+    final list = j is Map ? j['items'] : j;
+    return (list is List ? list : const []).whereType<Map>().map((m) => m.cast<String, dynamic>()).toList();
+  }
+
+  /// The user's portfolio; null before one is created (404).
+  Future<PortfolioOverview?> getPortfolio() async {
+    try {
+      final j = await get('/portfolio');
+      if (j is! Map) throw const ApiException(status: 0, type: 'bad-reply', title: 'Unexpected reply from the server.');
+      return PortfolioOverview.fromJson(j.cast<String, dynamic>());
+    } on ApiException catch (e) {
+      if (e.status == 404) return null;
+      rethrow;
+    }
+  }
+
+  /// Contact-form messages, newest first.
+  Future<List<PortfolioMessage>> listPortfolioMessages() async =>
+      sortMessagesNewest(_items(await get('/portfolio/messages')).map(PortfolioMessage.fromJson));
+
+  Future<PortfolioMessage> setPortfolioMessageRead(String id, bool read) async {
+    final j = await patch('/portfolio/messages/${Uri.encodeComponent(id)}', body: {'read': read});
+    if (j is! Map) throw const ApiException(status: 0, type: 'bad-reply', title: 'Unexpected reply from the server.');
+    return PortfolioMessage.fromJson(j.cast<String, dynamic>());
+  }
+
+  Future<void> deletePortfolioMessage(String id) => delete('/portfolio/messages/${Uri.encodeComponent(id)}');
+
+  /// Every item of [kind], drafts included, in the portfolio's order.
+  Future<List<PortfolioItem>> listPortfolioItems(PortfolioKind kind) async =>
+      _items(await get('/portfolio/${kind.path}')).map((m) => PortfolioItem.fromJson(kind, m)).toList();
+
+  /// Publishes or unpublishes an item. A project with no image is a 400.
+  Future<PortfolioItem> setPortfolioItemPublished(PortfolioKind kind, String id, bool published) async {
+    final j = await patch('/portfolio/${kind.path}/${Uri.encodeComponent(id)}', body: {'published': published});
+    if (j is! Map) throw const ApiException(status: 0, type: 'bad-reply', title: 'Unexpected reply from the server.');
+    return PortfolioItem.fromJson(kind, j.cast<String, dynamic>());
+  }
 
   /// [url] as an absolute address: a server path (`/api/v1/...`) is on this
   /// server.

@@ -15,6 +15,7 @@ import { GenerationModule } from './modules/generation/generation.module.js';
 import { HealthModule } from './modules/health/health.module.js';
 import { HubModule } from './modules/hub/hub.module.js';
 import { InterviewPrepModule } from './modules/interview-prep/interview-prep.module.js';
+import { PortfolioModule } from './modules/portfolio/portfolio.module.js';
 import { InterviewsModule } from './modules/interviews/interviews.module.js';
 import { OnboardingModule } from './modules/onboarding/onboarding.module.js';
 import { ProgressModule } from './modules/progress/progress.module.js';
@@ -75,6 +76,7 @@ import { TodayModule } from './modules/today/today.module.js';
 
     // Preparing for a real interview (desktop Claude, OpenAI fallback)
     InterviewPrepModule,
+    PortfolioModule,
   ],
 })
 export class AppModule {}

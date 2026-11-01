@@ -12,6 +12,7 @@ import { RouterProvider, type RouterHistory } from '@tanstack/react-router';
 import { useMemo, useState } from 'react';
 
 import { NotInTauri } from './pages/NotInTauri';
+import { DesktopPortfolioProvider } from './portfolio';
 import { tauriLearnClient } from './learn';
 import { createAppRouter } from './router';
 import { isTauri, tauriClient } from './tauri';
@@ -73,8 +74,10 @@ export function App({
       <QueryClientProvider client={queryClient}>
         <HuntProvider client={client} navigator={navigator}>
           <LearnProvider client={learn} navigator={learnNavigator} surface="desktop">
-            <HuntEvents />
-            <RouterProvider router={router} />
+            <DesktopPortfolioProvider>
+              <HuntEvents />
+              <RouterProvider router={router} />
+            </DesktopPortfolioProvider>
           </LearnProvider>
         </HuntProvider>
       </QueryClientProvider>

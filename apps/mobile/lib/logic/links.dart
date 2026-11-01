@@ -2,7 +2,7 @@ import 'dart:convert';
 
 /// Where tapping a notification (in the Alerts tab, a system notification,
 /// or a Firebase push) takes the user.
-enum LinkKind { application, applications, jobs, jobSites, interviewPrep, interviewPreps, mockInterview, home }
+enum LinkKind { application, applications, jobs, jobSites, interviewPrep, interviewPreps, mockInterview, portfolioMessage, portfolioMessages, home }
 
 class AppLink {
   final LinkKind kind;
@@ -44,6 +44,11 @@ AppLink resolveLink(String? linkPage, String? linkId) {
     case 'mock_interview':
     case 'mock-interviews':
       return id == null ? const AppLink(LinkKind.interviewPreps) : AppLink(LinkKind.mockInterview, id);
+    // PORTFOLIO_MESSAGE: `linkId` is the contact message's id.
+    case 'portfolio-messages':
+    case 'portfolio_messages':
+    case 'portfolio-message':
+      return id == null ? const AppLink(LinkKind.portfolioMessages) : AppLink(LinkKind.portfolioMessage, id);
     default:
       return const AppLink(LinkKind.home);
   }
@@ -78,10 +83,11 @@ const huntApplications = 0, huntJobs = 1;
 const learnRoutine = 0, learnRecall = 1, learnInterviews = 2, learnPrep = 3, learnReading = 4, learnLive = 5;
 
 /// The tab a link lands on (an application detail opens over Hunt, job
-/// sites over More, an interview prep or a mock interview over Learn).
+/// sites and portfolio messages over More, an interview prep or a mock
+/// interview over Learn).
 int tabFor(AppLink link) => switch (link.kind) {
       LinkKind.application || LinkKind.applications || LinkKind.jobs => tabHunt,
-      LinkKind.jobSites => tabMore,
+      LinkKind.jobSites || LinkKind.portfolioMessage || LinkKind.portfolioMessages => tabMore,
       LinkKind.interviewPrep || LinkKind.interviewPreps || LinkKind.mockInterview => tabLearn,
       LinkKind.home => tabToday,
     };

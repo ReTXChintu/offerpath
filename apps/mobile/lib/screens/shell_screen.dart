@@ -19,6 +19,7 @@ import 'job_sites_screen.dart';
 import 'hunt_screen.dart';
 import 'more_screen.dart';
 import 'notifications_screen.dart';
+import 'portfolio_messages_screen.dart';
 
 /// Opens the screen a notification links to: switches tab, then pushes a
 /// detail screen when the link names one.
@@ -43,6 +44,14 @@ void openAppLink(BuildContext context, AppLink link) {
     case LinkKind.mockInterview:
       nav.openLearn(learnPrep);
       openMockInterview(context, link.id!);
+    case LinkKind.portfolioMessages:
+      nav.select(tabMore);
+      openPortfolioMessages(context);
+    case LinkKind.portfolioMessage:
+      nav.select(tabMore);
+      // The inbox under the message, so Back lands there.
+      openPortfolioMessages(context);
+      openPortfolioMessage(context, link.id!);
     case LinkKind.home:
       nav.select(tabToday);
   }

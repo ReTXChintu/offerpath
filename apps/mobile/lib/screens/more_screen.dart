@@ -3,17 +3,19 @@ import 'package:provider/provider.dart';
 
 import '../learn/progress_page.dart';
 import '../state/auth_controller.dart';
+import '../state/portfolio_controller.dart';
 import '../state/queue_controller.dart';
 import '../state/update_controller.dart';
 import '../widgets/common.dart';
 import 'about_screen.dart';
 import 'answers_screen.dart';
+import 'portfolio_screen.dart';
 import 'job_sites_screen.dart';
 import 'queue_screen.dart';
 import 'settings_screen.dart';
 
-/// Everything else: progress, the queue, job-site profiles, saved answers,
-/// settings, about.
+/// Everything else: progress, the portfolio, the queue, job-site profiles,
+/// saved answers, settings, about.
 class MoreScreen extends StatelessWidget {
   const MoreScreen({super.key});
 
@@ -24,6 +26,8 @@ class MoreScreen extends StatelessWidget {
     final auth = context.watch<AuthController>();
     final queued = context.watch<QueueController>().count;
     final updateAvailable = context.watch<UpdateController>().showBanner;
+    final portfolio = Provider.of<PortfolioController?>(context);
+    final portfolioUnread = portfolio?.unread ?? 0;
     final theme = Theme.of(context);
 
     Widget tile(IconData icon, Color color, String title, String subtitle, Widget screen, {Widget? trailing}) => ListTile(
@@ -59,7 +63,22 @@ class MoreScreen extends StatelessWidget {
           const SectionHeader('You'),
           AppCard(
             padding: const EdgeInsets.symmetric(vertical: 4),
-            child: tile(Icons.insights_outlined, Colors.green, 'Progress', 'Coding score, today, weakest skills, the hunt funnel', const ProgressPage()),
+            child: Column(children: [
+              tile(Icons.insights_outlined, Colors.green, 'Progress', 'Coding score, today, weakest skills, the hunt funnel', const ProgressPage()),
+              if (portfolio != null) ...[
+                const Divider(indent: 70),
+                tile(
+                  Icons.web,
+                  Colors.deepOrange,
+                  'Portfolio',
+                  portfolioUnread > 0
+                      ? '$portfolioUnread unread message${portfolioUnread == 1 ? '' : 's'} from your site'
+                      : 'Messages from your site, drafts to publish',
+                  const PortfolioScreen(),
+                  trailing: portfolioUnread > 0 ? Badge(label: Text('$portfolioUnread')) : const Icon(Icons.chevron_right),
+                ),
+              ],
+            ]),
           ),
           const SectionHeader('Agent'),
           AppCard(

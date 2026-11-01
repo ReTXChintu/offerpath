@@ -36,11 +36,25 @@ async function bootstrap(): Promise<void> {
   app.setGlobalPrefix(`${env.API_GLOBAL_PREFIX}/v1`);
   app.useGlobalFilters(new ProblemDetailsFilter());
   app.use(helmet());
-  // The web app is served from its own port, so the browser needs CORS.
-  app.enableCors({
-    origin: config.corsOrigins,
-    credentials: true,
-    allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key'],
+  // The web app is served from its own port, so the browser needs CORS. The
+  // public portfolio API is read by portfolio sites anywhere: open, no cookies.
+  const publicPrefix = `/${env.API_GLOBAL_PREFIX}/v1/public/`;
+  app.enableCors((req: { url?: string }, callback) => {
+    callback(
+      null,
+      req.url?.startsWith(publicPrefix)
+        ? {
+            origin: '*',
+            credentials: false,
+            methods: ['GET', 'POST'],
+            allowedHeaders: ['Content-Type'],
+          }
+        : {
+            origin: config.corsOrigins,
+            credentials: true,
+            allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key'],
+          },
+    );
   });
 
   // Synced documents and code submissions are text; 2 MB is generous and caps a trivial DoS.

@@ -62,6 +62,14 @@ export const PROGRESS: NavEntry = {
   keywords: 'skills funnel history',
 };
 
+/** The portfolio site's content: settings, projects, skills, experience, tools, messages. */
+export const PORTFOLIO: NavEntry = {
+  path: '/portfolio',
+  label: 'Portfolio',
+  icon: 'layout',
+  keywords: 'site projects skills experience developer tools messages contact cloudinary mockup',
+};
+
 export const BOTTOM: NavEntry[] = [
   { path: '/agent', label: 'Agent', icon: 'bot', keywords: 'activity queue runs logs' },
   { path: '/settings', label: 'Settings', icon: 'settings', keywords: 'account sources chrome' },

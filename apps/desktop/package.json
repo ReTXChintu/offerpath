@@ -16,6 +16,7 @@
     "@monaco-editor/react": "^4.7.0",
     "@offerpath/hunt": "workspace:*",
     "@offerpath/learn": "workspace:*",
+    "@offerpath/portfolio": "workspace:*",
     "@offerpath/ui": "workspace:*",
     "@tanstack/react-query": "^5.90.0",
     "@tanstack/react-router": "^1.130.0",

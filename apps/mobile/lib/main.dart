@@ -13,6 +13,7 @@ import 'state/jobs_controller.dart';
 import 'state/learning_controller.dart';
 import 'state/nav_controller.dart';
 import 'state/notifications_controller.dart';
+import 'state/portfolio_controller.dart';
 import 'state/profiles_controller.dart';
 import 'state/queue_controller.dart';
 import 'state/update_controller.dart';
@@ -55,6 +56,11 @@ Future<void> main() async {
         ChangeNotifierProxyProvider<ConnectionController, InterviewPrepController>(
           create: (context) => InterviewPrepController(auth, context.read<ConnectionController>()),
           update: (_, connection, previous) => previous ?? InterviewPrepController(auth, connection),
+        ),
+        ChangeNotifierProxyProvider<ConnectionController, PortfolioController>(
+          create: (context) => PortfolioController(auth, connection: context.read<ConnectionController>()),
+          update: (_, connection, previous) => previous ?? PortfolioController(auth, connection: connection),
+          lazy: false,
         ),
         ChangeNotifierProxyProvider<ConnectionController, ApplicationsController>(
           create: (context) => ApplicationsController(context.read<ConnectionController>()),

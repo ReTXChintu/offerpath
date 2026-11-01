@@ -18,6 +18,7 @@ import {
   TechnologyView,
   TodayPage,
 } from '@offerpath/learn';
+import { PortfolioPage, parsePortfolioTab } from '@offerpath/portfolio';
 import {
   createBrowserHistory,
   createRootRoute,
@@ -102,6 +103,12 @@ const routeTree = rootRoute.addChildren([
   page(
     '/jobs/$jobId',
     withParam('jobId', (id) => <JobDetailPage key={id} jobId={id} />),
+  ),
+  // The portfolio site's content (docs/portfolio.md): one path per tab.
+  page('/portfolio', () => <PortfolioPage />),
+  page(
+    '/portfolio/$tab',
+    withParam('tab', (tab) => <PortfolioPage tab={parsePortfolioTab(tab)} />),
   ),
   page('/settings', SettingsPage),
 ]);
