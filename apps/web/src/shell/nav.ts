@@ -28,6 +28,12 @@ export const GROW: NavEntry[] = [
     icon: 'calendarPlus',
     keywords: 'job description questions plan practise upcoming',
   },
+  {
+    path: '/live-practice',
+    label: 'Live practice',
+    icon: 'mic',
+    keywords: 'partner listen microphone answers voice realtime',
+  },
 ];
 
 /** Reached from the palette (and the Interview prep page) rather than the sidebar. */

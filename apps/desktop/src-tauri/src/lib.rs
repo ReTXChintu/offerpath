@@ -140,6 +140,19 @@ fn forward_remote_events(app: AppHandle, remote: Arc<RemoteClient>) {
     });
 }
 
+/// Whether `url` is this app's own content: the bundled pages
+/// (`http://tauri.localhost` on Windows, `tauri://localhost` elsewhere) or
+/// the dev server on localhost. Only these may use the microphone unasked.
+fn is_app_origin(url: &tauri::Url) -> bool {
+    let bundled = matches!(
+        (url.scheme(), url.host_str()),
+        ("tauri", Some("localhost")) | ("http" | "https", Some("tauri.localhost"))
+    );
+    let dev_server =
+        cfg!(debug_assertions) && url.scheme() == "http" && url.host_str() == Some("localhost");
+    bundled || dev_server
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Development convenience: a `.env` in the repo (or any parent directory)
@@ -185,6 +198,21 @@ pub fn run() {
                 }
             }
         })
+        // Live practice listens through the webview's getUserMedia. The
+        // app's own pages may use the microphone without WebView2's
+        // "tauri.localhost wants to use your microphone" prompt (Windows'
+        // own privacy setting still applies); anything else gets the default.
+        .on_permission_request(|webview, kind| {
+            use tauri::webview::{PermissionKind, PermissionResponse};
+            match kind {
+                PermissionKind::Microphone
+                    if webview.url().map(|u| is_app_origin(&u)).unwrap_or(false) =>
+                {
+                    PermissionResponse::Allow
+                }
+                _ => PermissionResponse::Default,
+            }
+        })
         .setup(move |app| {
             let handle = app.handle().clone();
             tray::create(&handle)?;
@@ -220,6 +248,7 @@ pub fn run() {
             commands::backend_logout,
             commands::get_sync_status,
             commands::learn_api_request,
+            commands::learn_api_download,
             commands::get_candidate_profile,
             commands::save_candidate_profile,
             commands::list_experiences,
@@ -300,4 +329,19 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running Offerpath");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_app_origin;
+
+    #[test]
+    fn only_the_apps_own_pages_get_the_microphone() {
+        let ok = |u: &str| is_app_origin(&tauri::Url::parse(u).unwrap());
+        assert!(ok("http://tauri.localhost/#/live-practice/abc"));
+        assert!(ok("tauri://localhost/index.html"));
+        assert!(!ok("https://example.com/"));
+        assert!(!ok("http://tauri.localhost.evil.com/"));
+        assert!(!ok("http://192.168.1.5:50004/"));
+    }
 }

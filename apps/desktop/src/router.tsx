@@ -11,12 +11,14 @@ import {
 import {
   InterviewGuide,
   InterviewPrepList,
+  LivePracticeList,
   Onboarding,
   PracticePage,
   PrepCreate,
   RecallPage,
   RoadmapPage,
   Technologies,
+  VoiceSetupPage,
 } from '@offerpath/learn';
 import { PortfolioPage } from '@offerpath/portfolio';
 import {
@@ -35,6 +37,7 @@ import {
   ExerciseRoute,
   InterviewPrepRoute,
   InterviewRoute,
+  LivePracticeRoute,
   MockInterviewRoute,
   ProjectRoute,
   RequireAccount,
@@ -76,6 +79,10 @@ const routeTree = rootRoute.addChildren([
   learn('/interview-prep/new', PrepCreate),
   learn('/interview-prep/$prepId', InterviewPrepRoute),
   learn('/mock-interview/$interviewId', MockInterviewRoute),
+  // Live practice with a partner (docs/live-practice.md): the webview listens.
+  learn('/live-practice', LivePracticeList),
+  learn('/live-practice/voice', VoiceSetupPage),
+  learn('/live-practice/$sessionId', LivePracticeRoute),
   learn('/progress', DesktopProgress),
   learn('/onboarding', Onboarding),
   // The portfolio site's content (docs/portfolio.md): one path per tab.

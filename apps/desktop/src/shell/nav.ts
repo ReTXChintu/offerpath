@@ -37,6 +37,12 @@ export const GROW: NavSection = {
       icon: 'calendarPlus',
       keywords: 'job description questions plan practise upcoming',
     },
+    {
+      path: '/live-practice',
+      label: 'Live practice',
+      icon: 'mic',
+      keywords: 'partner listen microphone answers voice realtime',
+    },
   ],
 };
 

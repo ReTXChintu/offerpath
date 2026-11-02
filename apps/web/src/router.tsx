@@ -6,6 +6,8 @@ import {
   InterviewGuide,
   InterviewPrepList,
   InterviewSession,
+  LivePracticeList,
+  LivePracticeSession,
   MockInterviewPage,
   Onboarding,
   PracticePage,
@@ -17,6 +19,7 @@ import {
   Technologies,
   TechnologyView,
   TodayPage,
+  VoiceSetupPage,
 } from '@offerpath/learn';
 import { PortfolioPage, parsePortfolioTab } from '@offerpath/portfolio';
 import {
@@ -89,6 +92,15 @@ const routeTree = rootRoute.addChildren([
   page(
     '/mock-interview/$interviewId',
     withParam('interviewId', (id) => <MockInterviewPage key={id} interviewId={id} />),
+  ),
+  // Live practice with a partner (docs/live-practice.md). Listening needs a
+  // secure context: over plain http the pages explain that and still list,
+  // restart and take typed questions.
+  page('/live-practice', LivePracticeList),
+  page('/live-practice/voice', VoiceSetupPage),
+  page(
+    '/live-practice/$sessionId',
+    withParam('sessionId', (id) => <LivePracticeSession key={id} sessionId={id} />),
   ),
   page('/progress', WebProgress),
   page('/onboarding', Onboarding),

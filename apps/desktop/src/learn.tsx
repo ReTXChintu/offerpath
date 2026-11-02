@@ -6,6 +6,7 @@ import {
   ExerciseWorkspace,
   FunnelPanel,
   InterviewSession,
+  LivePracticeSession,
   MockInterviewPage,
   PrepDetail,
   ProgressPage,
@@ -73,6 +74,39 @@ export function tauriLearnClient(call: Invoke = invoke as Invoke): LearnClient {
       }
       return (reply.body ?? undefined) as T;
     },
+    /**
+     * A file's bytes (the live-practice speaker model), fetched by the Rust
+     * side (`learn_api_download`) and handed over as raw bytes. No progress:
+     * the page shows an indeterminate bar.
+     */
+    async download(path: string): Promise<ArrayBuffer> {
+      let bytes: unknown;
+      try {
+        bytes = await call('learn_api_download', { path });
+      } catch (e) {
+        const err = (e ?? {}) as { code?: string; message?: string };
+        throw new ApiError({
+          type: 'urn:offerpath:error:network',
+          title: 'Download failed',
+          status: 0,
+          detail: err.message ?? 'Cannot reach the Offerpath server.',
+        });
+      }
+      if (bytes instanceof ArrayBuffer) return bytes;
+      if (ArrayBuffer.isView(bytes)) {
+        return bytes.buffer.slice(
+          bytes.byteOffset,
+          bytes.byteOffset + bytes.byteLength,
+        ) as ArrayBuffer;
+      }
+      if (Array.isArray(bytes)) return Uint8Array.from(bytes as number[]).buffer;
+      throw new ApiError({
+        type: 'urn:offerpath:error:unknown',
+        title: 'Download failed',
+        status: 0,
+        detail: 'The voice model came back in a form this app does not read.',
+      });
+    },
   };
 }
 
@@ -128,6 +162,11 @@ export function InterviewRoute() {
 export function InterviewPrepRoute() {
   const { prepId } = useParams({ strict: false }) as { prepId?: string };
   return <PrepDetail key={prepId} prepId={prepId ?? ''} />;
+}
+
+export function LivePracticeRoute() {
+  const { sessionId } = useParams({ strict: false }) as { sessionId?: string };
+  return <LivePracticeSession key={sessionId} sessionId={sessionId ?? ''} />;
 }
 
 export function MockInterviewRoute() {

@@ -18,7 +18,14 @@ export default defineConfig({
     proxy: { '/api': 'http://localhost:50005' },
   },
   preview: { port: 50004 },
+  // onnxruntime-web (live practice's voice check, loaded on demand) finds its
+  // .wasm next to its own module; pre-bundling would move the module away
+  // from it, so development serves it as it is.
+  optimizeDeps: { exclude: ['onnxruntime-web'] },
   build: {
+    // Live practice's AudioWorklet stays a file served from this origin: a
+    // data: URL module would need the CSP to allow data: scripts.
+    assetsInlineLimit: (file: string) => (file.endsWith('.worklet.js') ? false : undefined),
     // Monaco (bundled, see src/monaco.ts) is most of the size.
     chunkSizeWarningLimit: 5000,
   },

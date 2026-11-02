@@ -20,7 +20,14 @@ export default defineConfig({
     watch: { ignored: ['**/src-tauri/**'] },
   },
   envPrefix: ['VITE_', 'TAURI_ENV_*'],
+  // onnxruntime-web (live practice's voice check, loaded on demand) finds its
+  // .wasm next to its own module; pre-bundling would move the module away
+  // from it, so development serves it as it is.
+  optimizeDeps: { exclude: ['onnxruntime-web'] },
   build: {
+    // Live practice's AudioWorklet stays a file served from this origin: a
+    // data: URL module would break the CSP's script-src 'self'.
+    assetsInlineLimit: (file: string) => (file.endsWith('.worklet.js') ? false : undefined),
     target: process.env.TAURI_ENV_PLATFORM === 'windows' ? 'chrome105' : 'safari13',
     minify: !process.env.TAURI_ENV_DEBUG ? 'esbuild' : false,
     sourcemap: !!process.env.TAURI_ENV_DEBUG,

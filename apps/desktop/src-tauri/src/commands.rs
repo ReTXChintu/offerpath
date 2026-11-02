@@ -217,6 +217,19 @@ pub async fn learn_api_request(
         .map_err(Into::into)
 }
 
+/// A public file's bytes from the API (only `/downloads/...`), for the
+/// learning pages: live practice's speaker model. Raw bytes over IPC, so the
+/// webview gets an ArrayBuffer and needs no `connect-src` to the server.
+#[tauri::command]
+pub async fn learn_api_download(ctx: Ctx<'_>, path: String) -> R<tauri::ipc::Response> {
+    let bytes = ctx
+        .sync
+        .api_download(&path)
+        .await
+        .map_err(UserFacingError::from)?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 // ---- candidate ---------------------------------------------------------------
 
 #[tauri::command]

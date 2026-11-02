@@ -180,6 +180,7 @@ describe('desktop shell', () => {
       'Recall',
       'Interviews',
       'Interview prep',
+      'Live practice',
     ]) {
       expect(within(nav).getByRole('link', { name: label })).toBeInTheDocument();
     }
@@ -302,5 +303,22 @@ describe('the desktop learning client', () => {
       status: 503,
     });
     await expect(client.request('/today')).rejects.toMatchObject({ kind: 'not-signed-in' });
+  });
+
+  it('downloads the speaker model as raw bytes through learn_api_download', async () => {
+    const bytes = new Uint8Array([1, 2, 3]).buffer;
+    const call = vi
+      .fn()
+      .mockResolvedValueOnce(bytes)
+      .mockRejectedValueOnce({ message: 'Server error' });
+    const client = tauriLearnClient(call);
+    const got = await client.download?.('/downloads/speaker-model/file');
+    expect(new Uint8Array(got ?? new ArrayBuffer(0))).toEqual(new Uint8Array([1, 2, 3]));
+    expect(call).toHaveBeenCalledWith('learn_api_download', {
+      path: '/downloads/speaker-model/file',
+    });
+    await expect(client.download?.('/downloads/speaker-model/file')).rejects.toMatchObject({
+      status: 0,
+    });
   });
 });

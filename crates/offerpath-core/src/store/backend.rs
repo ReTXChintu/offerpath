@@ -283,6 +283,40 @@ impl BackendClientHandle {
     }
 }
 
+/// The API paths whose bytes the webview may ask for (`download`): public
+/// files such as live practice's speaker model.
+pub fn valid_download_path(path: &str) -> bool {
+    valid_api_path(path) && path.starts_with("/downloads/")
+}
+
+impl BackendClientHandle {
+    /// A file's bytes from the API (a GET under `/downloads/`), for the
+    /// learning pages: live practice's speaker model.
+    pub async fn download(&self, http: &reqwest::Client, path: &str) -> CoreResult<Vec<u8>> {
+        if !valid_download_path(path) {
+            return Err(CoreError::Validation(format!(
+                "Not a download path: {path}"
+            )));
+        }
+        let resp = http
+            .get(format!("{}/v1{path}", api(&self.base_url)))
+            .bearer_auth(&self.device_token)
+            .send()
+            .await
+            .map_err(|e| CoreError::Network(e.to_string()))?;
+        if !resp.status().is_success() {
+            return parse_backend_response::<Value>(resp)
+                .await
+                .map(|_| Vec::new());
+        }
+        let bytes = resp
+            .bytes()
+            .await
+            .map_err(|e| CoreError::Network(e.to_string()))?;
+        Ok(bytes.to_vec())
+    }
+}
+
 /// The API answers errors as problem details: `{ type, title, status, detail, errors }`.
 #[derive(Deserialize)]
 struct ErrBody {
@@ -355,6 +389,14 @@ mod tests {
         assert!(!valid_api_path("/x\\y"));
         assert!(!valid_api_path("/redirect?to=http://evil"));
         assert!(!valid_api_path("/x\ny"));
+    }
+
+    #[test]
+    fn only_download_paths_are_downloaded() {
+        assert!(valid_download_path("/downloads/speaker-model/file"));
+        assert!(!valid_download_path("/live-practice/voice"));
+        assert!(!valid_download_path("/downloads/../auth/me"));
+        assert!(!valid_download_path("//evil.example.com/downloads/x"));
     }
 
     #[test]

@@ -195,6 +195,17 @@ impl SyncWorker {
             .await
     }
 
+    /// A file's bytes from the API with this desktop's device token
+    /// (`BackendClientHandle::download`): live practice's speaker model.
+    pub async fn api_download(&self, path: &str) -> CoreResult<Vec<u8>> {
+        let client = self.client().await?;
+        let http = reqwest::Client::builder()
+            .timeout(Duration::from_secs(600))
+            .build()
+            .unwrap_or_default();
+        client.download(&http, path).await
+    }
+
     async fn publish(&self) {
         let s = self.status().await;
         let _ = self.status_tx.send(s);
