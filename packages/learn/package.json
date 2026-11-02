@@ -31,7 +31,8 @@
     "@monaco-editor/react": "^4.7.0",
     "@offerpath/shared": "workspace:*",
     "@offerpath/types": "workspace:*",
-    "@offerpath/ui": "workspace:*"
+    "@offerpath/ui": "workspace:*",
+    "onnxruntime-web": "^1.31.1"
   },
   "peerDependencies": {
     "@tanstack/react-query": "^5.90.0",

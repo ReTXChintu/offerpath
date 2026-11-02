@@ -12,3 +12,4 @@ crates/**
 packages/database/prisma/migrations/**
 docs/**
 .claude
+packages/learn/src/lib/live/__fixtures__/**

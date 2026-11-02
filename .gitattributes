@@ -5,3 +5,5 @@
 *.icns binary
 *.jar binary
 *.bat text eol=crlf
+*.wav binary
+*.f32 binary

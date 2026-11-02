@@ -30,7 +30,8 @@ if (typeof Element !== 'undefined') {
 
 afterEach(() => {
   cleanup();
-  window.localStorage.clear();
+  // A few tests run in node (the speaker-embedding parity check): no window.
+  if (typeof window !== 'undefined') window.localStorage.clear();
 });
 
 import { configure } from '@testing-library/react';
