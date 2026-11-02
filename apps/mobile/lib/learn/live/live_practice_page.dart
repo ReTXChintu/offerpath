@@ -76,6 +76,7 @@ class _LivePracticePageState extends State<LivePracticePage>
   );
   final _text = TextEditingController();
   bool _awake = false;
+  bool _restarting = false;
 
   @override
   void initState() {
@@ -157,6 +158,37 @@ class _LivePracticePageState extends State<LivePracticePage>
     if (await _c.delete() && mounted) Navigator.of(context).pop();
   }
 
+  /// An ended session: starts a new one with its prep, technologies and
+  /// title, and opens it listening in this one's place.
+  Future<void> _restart() async {
+    final view = _c.view;
+    if (view == null || _restarting) return;
+    setState(() => _restarting = true);
+    try {
+      final next = await widget.api.restartLivePractice(view);
+      if (!mounted) return;
+      await Navigator.of(context).pushReplacement(
+        MaterialPageRoute<void>(
+          builder: (_) => LivePracticePage(
+            api: widget.api,
+            sessionId: next.id,
+            initial: next,
+            autoStart: true,
+            mic: widget.mic,
+            connect: widget.connect,
+            wakelock: widget.wakelock,
+            voice: _voice,
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _restarting = false);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(liveErrorMessage(error))));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final view = _c.view;
@@ -166,10 +198,16 @@ class _LivePracticePageState extends State<LivePracticePage>
         actions: [
           if (view != null)
             PopupMenuButton<String>(
-              onSelected: (v) => v == 'end' ? _end() : _delete(),
+              onSelected: (v) => switch (v) {
+                'end' => _end(),
+                'restart' => _restart(),
+                _ => _delete(),
+              },
               itemBuilder: (_) => [
                 if (view.isActive)
                   const PopupMenuItem(value: 'end', child: Text('End session')),
+                if (view.isEnded)
+                  const PopupMenuItem(value: 'restart', child: Text('Restart')),
                 const PopupMenuItem(value: 'delete', child: Text('Delete')),
               ],
             ),
@@ -224,7 +262,11 @@ class _LivePracticePageState extends State<LivePracticePage>
                 ],
                 view.isActive
                     ? _MicPanel(controller: _c, onEnd: _end)
-                    : _SummaryPanel(view: view),
+                    : _SummaryPanel(
+                        view: view,
+                        restarting: _restarting,
+                        onRestart: _restart,
+                      ),
                 const SizedBox(height: 20),
                 SectionLabel('Questions · ${cards.length + saved.length}'),
                 if (cards.isEmpty && saved.isEmpty)
@@ -484,11 +526,17 @@ class _MicPanel extends StatelessWidget {
   }
 }
 
-/// An ended session.
+/// An ended session, and "Restart" for a new one like it.
 class _SummaryPanel extends StatelessWidget {
-  const _SummaryPanel({required this.view});
+  const _SummaryPanel({
+    required this.view,
+    required this.restarting,
+    required this.onRestart,
+  });
 
   final LivePracticeView view;
+  final bool restarting;
+  final VoidCallback onRestart;
 
   @override
   Widget build(BuildContext context) {
@@ -510,6 +558,26 @@ class _SummaryPanel extends StatelessWidget {
           Text(
             n == 1 ? '1 question answered' : '$n questions answered',
             style: TextStyle(fontSize: 13, color: tone.muted),
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            key: const ValueKey('live-restart'),
+            onPressed: restarting ? null : onRestart,
+            icon: restarting
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.replay),
+            label: const Text('Restart'),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            view.technologies.isEmpty
+                ? 'A new session with the same title starts listening at once.'
+                : 'A new session with ${view.technologies.join(', ')} starts listening at once.',
+            style: TextStyle(fontSize: 12, color: tone.muted),
           ),
         ],
       ),

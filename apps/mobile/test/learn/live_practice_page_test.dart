@@ -375,6 +375,118 @@ void main() {
     );
   });
 
+  group('restart', () {
+    FakeApi endedSession() => FakeApi()
+      ..on(
+        'GET',
+        _get,
+        FakeReply.ok(
+          liveViewJson(
+            prepId: 'p1',
+            title: 'Evening round',
+            status: 'ENDED',
+            exchanges: [liveExchangeJson()],
+          ),
+        ),
+      );
+
+    /// Lets a page transition finish (spinners keep pumpAndSettle busy).
+    Future<void> settleRoute(WidgetTester tester) async {
+      await flush(tester);
+      await tester.pump(const Duration(milliseconds: 600));
+      await flush(tester);
+    }
+
+    testWidgets(
+      'an ended session restarts as a new one with the same prep, technologies and title, listening at once',
+      (tester) async {
+        final next = liveViewJson(id: 's2', prepId: 'p1', title: 'Evening round');
+        final fake = endedSession()
+          ..on('POST', _base, FakeReply(201, next))
+          ..on('GET', '$_base/s2', FakeReply.ok(next))
+          ..on('POST', '$_base/s2/realtime', FakeReply.ok(realtimePassJson()));
+        await open(tester, fake);
+        expect(find.text('Session ended'), findsOneWidget);
+        expect(find.textContaining('React, Node.js starts listening'), findsOneWidget);
+
+        await tester.tap(find.byKey(const ValueKey('live-restart')));
+        await settleRoute(tester);
+
+        final post = fake.requests.firstWhere((r) => r.method == 'POST' && r.path == _base);
+        expect(post.body, {
+          'prepId': 'p1',
+          'technologies': ['React', 'Node.js'],
+          'title': 'Evening round',
+        });
+        // The new session took the old one's place and is listening.
+        expect(find.text('Session ended'), findsNothing);
+        expect(find.text('Listening'), findsOneWidget);
+        expect(connector.sockets, hasLength(1));
+      },
+    );
+
+    testWidgets('a refused restart says why and stays on the old session', (tester) async {
+      final fake = endedSession()
+        ..on(
+          'POST',
+          _base,
+          FakeReply(400, {
+            'type': 'urn:offerpath:error:bad-request',
+            'title': 'Bad request',
+            'status': 400,
+            'detail': 'Save your OpenAI key first.',
+          }),
+        );
+      await open(tester, fake);
+      await tester.tap(find.byKey(const ValueKey('live-restart')));
+      await settleRoute(tester);
+      expect(find.text('Session ended'), findsOneWidget);
+      expect(find.textContaining('Save your OpenAI key first.'), findsOneWidget);
+      expect(connector.sockets, isEmpty);
+    });
+
+    testWidgets('the list restarts an ended session from its row', (tester) async {
+      tallScreen(tester);
+      final fake = FakeApi()
+        ..on(
+          'GET',
+          _base,
+          FakeReply.ok({
+            'sessions': [
+              liveSummaryJson(),
+              liveSummaryJson(id: 's3', title: 'Now', status: 'ACTIVE'),
+            ],
+          }),
+        )
+        ..on('GET', _get, FakeReply.ok(liveViewJson(status: 'ENDED')))
+        ..on('POST', _base, FakeReply(201, liveViewJson(id: 's2')));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: LivePracticeListPage(
+              api: fake.client(),
+              // The voice setup was already offered on this phone.
+              voice: fakeVoiceRepo(fake.client(), embedder: embedder, cache: MemoryVoiceCache(offered: true)),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      // Only ended sessions can be restarted.
+      expect(find.byKey(const ValueKey('live-restart-s1')), findsOneWidget);
+      expect(find.byKey(const ValueKey('live-restart-s3')), findsNothing);
+
+      await tester.tap(find.byKey(const ValueKey('live-restart-s1')));
+      await settleRoute(tester);
+      final post = fake.requests.firstWhere((r) => r.method == 'POST' && r.path == _base);
+      expect(post.body, {
+        'technologies': ['React', 'Node.js'],
+        'title': 'React, Node.js',
+      });
+      expect(tester.widget<LivePracticePage>(find.byType(LivePracticePage)).sessionId, 's2');
+    });
+  });
+
   group('entry points', () {
     testWidgets(
       'the Learn page lists sessions; a new one without a key says where to add it',

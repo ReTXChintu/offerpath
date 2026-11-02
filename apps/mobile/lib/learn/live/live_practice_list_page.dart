@@ -88,6 +88,9 @@ class _LivePracticeListPageState extends State<LivePracticeListPage> {
   /// Whether a voiceprint is saved; null while unknown.
   bool? _voiceSetUp;
 
+  /// The session being restarted, if any.
+  String? _restarting;
+
   @override
   void initState() {
     super.initState();
@@ -144,6 +147,33 @@ class _LivePracticeListPageState extends State<LivePracticeListPage> {
   Future<void> _open(LivePracticeSummary s) async {
     await openLivePractice(context, widget.api, s.id, voice: _voice);
     await _load();
+  }
+
+  /// A new session like [s] (same prep, technologies and title), opened
+  /// listening.
+  Future<void> _restart(LivePracticeSummary s) async {
+    if (_restarting != null) return;
+    setState(() => _restarting = s.id);
+    try {
+      final old = await widget.api.getLivePractice(s.id);
+      final next = await widget.api.restartLivePractice(old);
+      if (!mounted) return;
+      setState(() => _restarting = null);
+      await openLivePractice(
+        context,
+        widget.api,
+        next.id,
+        initial: next,
+        autoStart: true,
+        voice: _voice,
+      );
+      await _load();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _restarting = null);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(liveErrorMessage(error))));
+    }
   }
 
   @override
@@ -209,7 +239,14 @@ class _LivePracticeListPageState extends State<LivePracticeListPage> {
           else ...[
             const SectionLabel('Sessions'),
             for (final s in sessions)
-              _SessionTile(session: s, onTap: () => _open(s)),
+              _SessionTile(
+                session: s,
+                onTap: () => _open(s),
+                onRestart: s.status == LiveStatus.ended
+                    ? () => _restart(s)
+                    : null,
+                restarting: _restarting == s.id,
+              ),
           ],
         ],
       ),
@@ -289,10 +326,19 @@ class _VoiceCard extends StatelessWidget {
 }
 
 class _SessionTile extends StatelessWidget {
-  const _SessionTile({required this.session, required this.onTap});
+  const _SessionTile({
+    required this.session,
+    required this.onTap,
+    this.onRestart,
+    this.restarting = false,
+  });
 
   final LivePracticeSummary session;
   final VoidCallback onTap;
+
+  /// Ended sessions only.
+  final VoidCallback? onRestart;
+  final bool restarting;
 
   @override
   Widget build(BuildContext context) {
@@ -348,6 +394,22 @@ class _SessionTile extends StatelessWidget {
                     ],
                   ),
                 ),
+                if (onRestart != null)
+                  restarting
+                      ? const Padding(
+                          padding: EdgeInsets.all(12),
+                          child: SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        )
+                      : IconButton(
+                          key: ValueKey('live-restart-${session.id}'),
+                          tooltip: 'Restart',
+                          onPressed: onRestart,
+                          icon: Icon(Icons.replay, color: tone.accent),
+                        ),
                 Icon(Icons.chevron_right, size: 20, color: tone.muted),
               ],
             ),

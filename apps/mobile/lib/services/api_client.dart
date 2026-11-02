@@ -399,6 +399,10 @@ class ApiClient {
     }, timeout: const Duration(seconds: 60)));
   }
 
+  /// A new session like [old]: the same prep, technologies and title.
+  Future<LivePracticeView> restartLivePractice(LivePracticeView old) =>
+      startLivePractice(prepId: old.prepId, technologies: old.technologies, title: old.title);
+
   Future<LivePracticeView> getLivePractice(String id) async => _live(await get(_livePath(id)));
 
   Future<LivePracticeView> updateLivePractice(String id, {String? title}) async => _live(await patch(_livePath(id), body: {

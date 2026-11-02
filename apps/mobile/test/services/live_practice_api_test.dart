@@ -58,6 +58,18 @@ void main() {
     expect(fake.requests.last.body, {'prepId': 'p1'});
   });
 
+  test('restart starts a new session with the same prep, technologies and title', () async {
+    final fake = FakeApi()..on('POST', base, FakeReply(201, liveViewJson(id: 's2')));
+    final api = fake.client();
+    final old = LivePracticeView.fromJson(liveViewJson(prepId: 'p1', title: 'Evening round', status: 'ENDED'));
+    expect((await api.restartLivePractice(old)).id, 's2');
+    expect(fake.requests.single.body, {
+      'prepId': 'p1',
+      'technologies': ['React', 'Node.js'],
+      'title': 'Evening round',
+    });
+  });
+
   test('start without a key is a 400 with its detail', () async {
     final fake = FakeApi()
       ..on(
