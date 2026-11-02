@@ -346,8 +346,8 @@ export class LivePracticeController {
     void (async () => {
       let role: LiveRole = 'interviewer';
       try {
-        const similarity = await voice.similarity(speakerSamples(pcm, REALTIME_SAMPLE_RATE));
-        if (similarity >= voice.threshold) role = 'interviewee';
+        // Window by window, so a turn where both spoke is the interviewer's.
+        if (await voice.isUsers(speakerSamples(pcm, REALTIME_SAMPLE_RATE))) role = 'interviewee';
       } catch {
         // Can't tell: answer it.
       }

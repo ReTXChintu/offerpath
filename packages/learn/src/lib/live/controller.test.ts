@@ -154,6 +154,22 @@ describe('LivePracticeController', () => {
     expect(socket.responseCreates()).toBe(0);
   });
 
+  it('answers a turn where the partner spoke after the user without a pause', async () => {
+    const { c, mic, connect, embedder } = setUp();
+    disposers.push(c);
+    await c.startListening();
+    const socket = connect.last();
+    socket.emit({ type: 'input_audio_buffer.speech_started', item_id: 'both', audio_start_ms: 0 });
+    mic.speak(2000, 0.2); // the user
+    mic.speak(2000, -0.2); // the partner, straight after
+    socket.emit({ type: 'input_audio_buffer.speech_stopped', item_id: 'both', audio_end_ms: 4000 });
+    socket.emit({ type: 'input_audio_buffer.committed', item_id: 'both' });
+    await vi.waitFor(() => expect(socket.responseCreates()).toBe(1));
+    // Checked window by window (1.5 s every 0.75 s, plus one at the end).
+    expect(embedder.calls).toBe(5);
+    expect(c.conversation.turn('both')?.role).toBe('interviewer');
+  });
+
   it('answers a turn too short to check, and every turn without a voiceprint', async () => {
     const short = setUp();
     disposers.push(short.c);

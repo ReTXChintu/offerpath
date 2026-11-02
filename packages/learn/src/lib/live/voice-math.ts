@@ -164,6 +164,85 @@ export function checkTake(
   return null;
 }
 
+/**
+ * A turn is checked against the voiceprint in windows this long (ms), one
+ * starting every `SPEAKER_WINDOW_HOP_MS`: a single score for the whole turn
+ * blends both voices when the partner and the user speak without a pause.
+ */
+export const SPEAKER_WINDOW_MS = 1500;
+export const SPEAKER_WINDOW_HOP_MS = 750;
+
+/**
+ * At most this many windows are checked per turn (spread evenly, first and
+ * last included), so a long answer doesn't hold up the next question.
+ */
+export const SPEAKER_MAX_WINDOWS = 16;
+
+/** How far below the threshold a window must score to count as someone else's voice. */
+export const SPEAKER_OTHER_MARGIN = 0.15;
+
+/**
+ * The windows of a turn that hold speech (the phone's `speechWindows`). A
+ * window quieter than a tenth of the loudest, or below `floor`, is a pause
+ * and skipped. A turn no longer than one window is one window; a silent one
+ * has none.
+ */
+export function speechWindows(
+  samples: Float32Array,
+  {
+    sampleRate = SPEAKER_SAMPLE_RATE,
+    windowMs = SPEAKER_WINDOW_MS,
+    hopMs = SPEAKER_WINDOW_HOP_MS,
+    maxWindows = SPEAKER_MAX_WINDOWS,
+    floor = 0.003,
+  }: {
+    sampleRate?: number;
+    windowMs?: number;
+    hopMs?: number;
+    maxWindows?: number;
+    floor?: number;
+  } = {},
+): Float32Array[] {
+  const w = Math.floor((sampleRate * windowMs) / 1000);
+  const h = Math.floor((sampleRate * hopMs) / 1000);
+  if (samples.length <= w) {
+    return samples.length === 0 || rms(samples) < floor ? [] : [samples];
+  }
+  const starts: number[] = [];
+  for (let s = 0; s + w <= samples.length; s += h) starts.push(s);
+  // One more ending at the end, so the turn's tail is checked too.
+  const lastStart = starts[starts.length - 1] ?? 0;
+  if (lastStart + w < samples.length) starts.push(samples.length - w);
+  const windows = starts.map((s) => samples.subarray(s, s + w));
+  const levels = windows.map((win) => rms(win));
+  const quiet = Math.max(floor, Math.max(...levels) * 0.1);
+  const speech = windows.filter((_, i) => (levels[i] ?? 0) >= quiet);
+  if (speech.length <= maxWindows) return speech;
+  const picked: Float32Array[] = [];
+  for (let i = 0; i < maxWindows; i++) {
+    const win = speech[Math.floor((i * (speech.length - 1)) / (maxWindows - 1))];
+    if (win) picked.push(win);
+  }
+  return picked;
+}
+
+/**
+ * Whether a turn is the user's, from each speech window's similarity to the
+ * voiceprint (the phone's `isUsersTurn`): on average at or above
+ * `threshold`, and no window clearly someone else's (more than `margin`
+ * below it). A turn where both spoke is the interviewer's, so the question
+ * in it still gets an answer.
+ */
+export function isUsersTurn(
+  scores: number[],
+  threshold: number,
+  margin = SPEAKER_OTHER_MARGIN,
+): boolean {
+  if (scores.length === 0) return false;
+  const mean = scores.reduce((a, b) => a + b, 0) / scores.length;
+  return mean >= threshold && scores.every((s) => s >= threshold - margin);
+}
+
 /** Microphone audio (PCM16 at `fromRate`) ready for the speaker model: float samples at 16 kHz. */
 export function speakerSamples(pcm16: Uint8Array, fromRate: number): Float32Array {
   return resampleLinear(pcm16ToFloat(pcm16), fromRate, SPEAKER_SAMPLE_RATE);

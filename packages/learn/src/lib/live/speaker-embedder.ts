@@ -1,7 +1,7 @@
 import type * as Ort from 'onnxruntime-web';
 
 import { computeFbank } from './fbank';
-import { cosineSimilarity, l2Normalize } from './voice-math';
+import { cosineSimilarity, isUsersTurn, l2Normalize, speechWindows } from './voice-math';
 
 /**
  * Turns speech into a speaker embedding: a vector that is close (cosine) for
@@ -115,6 +115,18 @@ export class LiveVoice {
   /** How similar `samples16k` is to the user's voice (cosine, -1 to 1). */
   async similarity(samples16k: Float32Array): Promise<number> {
     return cosineSimilarity(await this.embedder.embed(samples16k), this.voiceprint);
+  }
+
+  /** Each speech window's similarity to the user's voice (`speechWindows`). */
+  async windowSimilarities(samples16k: Float32Array): Promise<number[]> {
+    const scores: number[] = [];
+    for (const window of speechWindows(samples16k)) scores.push(await this.similarity(window));
+    return scores;
+  }
+
+  /** Whether a turn is all the user's voice (`isUsersTurn`). */
+  async isUsers(samples16k: Float32Array): Promise<boolean> {
+    return isUsersTurn(await this.windowSimilarities(samples16k), this.threshold);
   }
 
   dispose(): Promise<void> {

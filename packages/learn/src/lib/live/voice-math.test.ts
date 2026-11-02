@@ -6,11 +6,14 @@ import {
   checkTake,
   cosineSimilarity,
   floatToPcm16,
+  isUsersTurn,
   l2Normalize,
   pcm16ToFloat,
   pcmLevel,
   resampleLinear,
+  rms,
   speakerSamples,
+  speechWindows,
   toBase64,
   trimSilence,
 } from './voice-math';
@@ -82,6 +85,57 @@ describe('voice math (the phone voice_math.dart, ported)', () => {
 
   it('encodes base64', () => {
     expect(toBase64(new Uint8Array([104, 105]))).toBe('aGk=');
+  });
+});
+
+/** `n` samples of a sine at `freq` Hz, 16 kHz. */
+function sine(n: number, freq: number, amplitude = 0.5): Float32Array {
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) out[i] = amplitude * Math.sin((2 * Math.PI * freq * i) / 16_000);
+  return out;
+}
+
+describe('speech windows (the phone speechWindows / isUsersTurn)', () => {
+  it('splits a turn into 1.5 s windows every 0.75 s, plus one ending at the end', () => {
+    const windows = speechWindows(sine(41_600, 220));
+    expect(windows).toHaveLength(3);
+    expect(windows.every((w) => w.length === 24_000)).toBe(true);
+    expect(windows[2]?.byteOffset).toBe((41_600 - 24_000) * 4);
+  });
+
+  it('a short turn is one window; silence is none', () => {
+    expect(speechWindows(sine(16_000, 220))).toHaveLength(1);
+    expect(speechWindows(new Float32Array(16_000))).toHaveLength(0);
+    expect(speechWindows(new Float32Array(48_000))).toHaveLength(0);
+  });
+
+  it('pauses are skipped, but a quieter voice is kept', () => {
+    const samples = new Float32Array(16_000 * 6);
+    // A loud voice, a pause, then a voice a third as loud.
+    samples.set(sine(24_000, 220), 0);
+    samples.set(sine(32_000, 220, 0.15), 16_000 * 4);
+    const windows = speechWindows(samples);
+    expect(windows.filter((w) => rms(w) < 0.15).length).toBeGreaterThan(0);
+    expect(windows.some((w) => rms(w) === 0)).toBe(false);
+  });
+
+  it('a long turn is checked in at most 16 windows, first and last included', () => {
+    const samples = sine(16_000 * 60, 220);
+    const windows = speechWindows(samples);
+    expect(windows).toHaveLength(16);
+    expect(windows[0]?.byteOffset).toBe(0);
+    const last = windows[15];
+    expect((last?.byteOffset ?? 0) / 4 + (last?.length ?? 0)).toBe(samples.length);
+  });
+
+  it("a turn is the user's only when every window sounds like them", () => {
+    expect(isUsersTurn([0.8, 0.75, 0.7], 0.64)).toBe(true);
+    // One clearly different stretch: the partner spoke.
+    expect(isUsersTurn([0.8, 0.8, 0.1], 0.64)).toBe(false);
+    // A little under the threshold is still them, when the rest is.
+    expect(isUsersTurn([0.8, 0.55, 0.75], 0.64)).toBe(true);
+    expect(isUsersTurn([0.6, 0.6], 0.64)).toBe(false);
+    expect(isUsersTurn([], 0.64)).toBe(false);
   });
 });
 
