@@ -133,4 +133,51 @@ void main() {
       expect(checkTake(Float32List(0)), TakeProblem.tooQuiet);
     });
   });
+
+  group('turns in windows', () {
+    test('1.5 s windows every 0.75 s, plus one ending at the end', () {
+      final windows = speechWindows(_sine(16000 * 26 ~/ 10, 220, 16000));
+      expect(windows, hasLength(3));
+      expect(windows.every((w) => w.length == 24000), isTrue);
+    });
+
+    test('a short turn is one window; silence is none', () {
+      expect(speechWindows(_sine(16000, 220, 16000)), hasLength(1));
+      expect(speechWindows(Float32List(16000)), isEmpty);
+      expect(speechWindows(Float32List(16000 * 3)), isEmpty);
+    });
+
+    test('pauses are skipped, but a quieter voice is kept', () {
+      final samples = Float32List(16000 * 6)
+        // A loud voice, a pause, then a voice a third as loud.
+        ..setAll(0, _sine(24000, 220, 16000))
+        ..setAll(16000 * 4, _sine(32000, 220, 16000, amplitude: 0.15));
+      final windows = speechWindows(samples);
+      final quiet = windows.where((w) => rms(w) < 0.15).length;
+      expect(quiet, greaterThan(0));
+      // The 2.5 s gap's middle windows (1.5–3 s, 2.25–3.75 s) are skipped.
+      expect(windows.any((w) => rms(w) == 0), isFalse);
+    });
+
+    test('a long turn is checked in at most 16 windows, first and last included', () {
+      final samples = _sine(16000 * 60, 220, 16000);
+      final windows = speechWindows(samples);
+      expect(windows, hasLength(16));
+      expect(windows.first.offsetInBytes, 0);
+      expect(
+        windows.last.offsetInBytes ~/ 4 + windows.last.length,
+        samples.length,
+      );
+    });
+
+    test("a turn is the user's only when every window sounds like them", () {
+      expect(isUsersTurn([0.8, 0.75, 0.7], 0.64), isTrue);
+      // One clearly different stretch: the partner spoke.
+      expect(isUsersTurn([0.8, 0.8, 0.1], 0.64), isFalse);
+      // A little under the threshold is still them, when the rest is.
+      expect(isUsersTurn([0.8, 0.55, 0.75], 0.64), isTrue);
+      expect(isUsersTurn([0.6, 0.6], 0.64), isFalse);
+      expect(isUsersTurn([], 0.64), isFalse);
+    });
+  });
 }

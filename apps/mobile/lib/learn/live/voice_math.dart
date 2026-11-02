@@ -149,6 +149,72 @@ TakeProblem? checkTake(
   return null;
 }
 
+/// A turn is checked against the voiceprint in windows this long, one
+/// starting every [speakerWindowHop]: a single score for the whole turn
+/// blends both voices when the partner and the user speak without a pause.
+const speakerWindow = Duration(milliseconds: 1500);
+const speakerWindowHop = Duration(milliseconds: 750);
+
+/// At most this many windows are checked per turn (spread evenly, first and
+/// last included), so a long answer doesn't hold up the next question.
+const speakerMaxWindows = 16;
+
+/// How far below the threshold a window must score to count as someone
+/// else's voice.
+const speakerOtherMargin = 0.15;
+
+/// The windows of a turn that hold speech (see [speakerWindow]). A window
+/// quieter than a tenth of the loudest, or below [floor], is a pause and
+/// skipped. A turn no longer than one window is one window; a silent one
+/// has none.
+List<Float32List> speechWindows(
+  Float32List samples, {
+  int sampleRate = speakerSampleRate,
+  Duration window = speakerWindow,
+  Duration hop = speakerWindowHop,
+  int maxWindows = speakerMaxWindows,
+  double floor = 0.003,
+}) {
+  final w = sampleRate * window.inMilliseconds ~/ 1000;
+  final h = sampleRate * hop.inMilliseconds ~/ 1000;
+  if (samples.length <= w) {
+    return samples.isEmpty || rms(samples) < floor ? [] : [samples];
+  }
+  final starts = <int>[for (var s = 0; s + w <= samples.length; s += h) s];
+  // One more ending at the end, so the turn's tail is checked too.
+  if (starts.last + w < samples.length) starts.add(samples.length - w);
+  final windows = [
+    for (final s in starts) Float32List.sublistView(samples, s, s + w),
+  ];
+  final levels = windows.map(rms).toList();
+  final quiet = math.max(floor, levels.reduce(math.max) * 0.1);
+  final speech = [
+    for (var i = 0; i < windows.length; i++)
+      if (levels[i] >= quiet) windows[i],
+  ];
+  if (speech.length <= maxWindows) return speech;
+  return [
+    for (var i = 0; i < maxWindows; i++)
+      speech[i * (speech.length - 1) ~/ (maxWindows - 1)],
+  ];
+}
+
+/// Whether a turn is the user's, from each speech window's similarity to
+/// the voiceprint: on average at or above [threshold], and no window
+/// clearly someone else's (more than [margin] below it). A turn where both
+/// spoke is the interviewer's, so the question in it still gets an answer;
+/// the user's own words answered by mistake cost little, since anything
+/// that isn't a question gets no answer.
+bool isUsersTurn(
+  List<double> scores,
+  double threshold, {
+  double margin = speakerOtherMargin,
+}) {
+  if (scores.isEmpty) return false;
+  final mean = scores.reduce((a, b) => a + b) / scores.length;
+  return mean >= threshold && scores.every((s) => s >= threshold - margin);
+}
+
 /// Microphone audio (PCM16 at [fromRate]) ready for the speaker model:
 /// float samples at 16 kHz.
 Float32List speakerSamples(List<int> pcm16, {required int fromRate}) =>

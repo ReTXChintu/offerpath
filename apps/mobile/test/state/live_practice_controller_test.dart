@@ -514,8 +514,10 @@ void main() {
       await rig.emit(_committed('item_1'));
       await rig.emit(_transcript('item_1', 'I led the payments migration.'));
 
-      // The turn's 2.6 s went to the model at 16 kHz.
-      expect(embedder.calls.single.length, 2600 * 16);
+      // The turn's 2.6 s went to the model at 16 kHz, in 1.5 s windows
+      // (0, 0.75 s, and one ending at the end).
+      expect(embedder.calls, hasLength(3));
+      expect(embedder.calls.every((c) => c.length == 1500 * 16), isTrue);
       expect(responseCreates(), 0);
       final line = rig.c.conversation.transcript.single;
       expect(line.role, LiveRole.interviewee);
@@ -554,6 +556,18 @@ void main() {
       expect(responseCreates(), 1);
       await rig.emit(_transcript('item_1', 'Why do you want this job?'));
       expect(rig.c.conversation.transcript.single.role, LiveRole.interviewer);
+    });
+
+    test('a turn where the partner spoke and the user went on without a pause is the interviewer\'s, and is answered', () async {
+      // The partner's question, then the user's voice straight after.
+      await listen([...tone(1500, otherVoice), ...tone(1500, ownerVoice)]);
+      await rig.emit(_started('item_1', 0));
+      await rig.emit(_stopped('item_1', 3000));
+      await rig.emit(_committed('item_1'));
+      await settle();
+      await rig.emit(_transcript('item_1', 'What is a closure? Right, so a closure...'));
+      expect(rig.c.conversation.transcript.single.role, LiveRole.interviewer);
+      expect(responseCreates(), 1);
     });
 
     test('a turn under a second is too short to check: the interviewer', () async {

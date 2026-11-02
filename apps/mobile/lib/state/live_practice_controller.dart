@@ -327,10 +327,10 @@ class LivePracticeController extends ChangeNotifier {
     unawaited(() async {
       var role = LiveRole.interviewer;
       try {
-        final similarity = await voice.similarity(
+        final users = await voice.isUsers(
           speakerSamples(pcm, fromRate: realtimeSampleRate),
         );
-        if (similarity >= voice.threshold) role = LiveRole.interviewee;
+        if (users) role = LiveRole.interviewee;
       } catch (_) {}
       if (_disposed || connectionNo != _connectionNo) return;
       _decide(itemId, check, role);

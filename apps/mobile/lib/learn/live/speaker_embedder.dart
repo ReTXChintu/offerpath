@@ -45,6 +45,19 @@ class LiveVoice {
   Future<double> similarity(Float32List samples16k) async =>
       cosineSimilarity(await embedder.embed(samples16k), voiceprint);
 
+  /// Each speech window's similarity to the user's voice ([speechWindows]).
+  Future<List<double>> windowSimilarities(Float32List samples16k) async {
+    final scores = <double>[];
+    for (final window in speechWindows(samples16k)) {
+      scores.add(await similarity(window));
+    }
+    return scores;
+  }
+
+  /// Whether a turn is all the user's voice ([isUsersTurn]).
+  Future<bool> isUsers(Float32List samples16k) async =>
+      isUsersTurn(await windowSimilarities(samples16k), threshold);
+
   Future<void> dispose() => embedder.dispose();
 }
 
