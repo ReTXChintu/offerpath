@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
+import { useMemo } from 'react';
 
 import { useApi, type ApiRequest } from '../context';
 
@@ -185,8 +186,10 @@ export const liveKeys = {
   detail: (id: string) => ['live-practice', 'detail', id] as const,
 };
 
+/** The calls, stable for as long as the client is. */
 export function useLiveApi(): LiveApi {
-  return liveApi(useApi());
+  const api = useApi();
+  return useMemo(() => liveApi(api), [api]);
 }
 
 /** Every session, newest first. */
