@@ -14,3 +14,5 @@ allowBuilds:
   msgpackr-extract: true
   # Analytics postinstall only; nothing needs it to build.
   '@scarf/scarf': false
+  # onnxruntime-web's protobufjs: a version-check postinstall only.
+  protobufjs: false
