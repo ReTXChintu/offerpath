@@ -3,7 +3,13 @@ import { defineConfig } from 'tsup';
 export default defineConfig((options) => ({
   // The stylesheet is its own entry: apps import `@offerpath/learn/styles.css`
   // once, after `@offerpath/ui/styles.css`.
-  entry: ['src/index.ts', 'src/styles.css'],
+  // The microphone's AudioWorklet is its own file, loaded by URL from the
+  // app's origin (`src/lib/live/mic.ts`): `dist/pcm-capture.worklet.js`.
+  entry: {
+    index: 'src/index.ts',
+    styles: 'src/styles.css',
+    'pcm-capture.worklet': 'src/lib/live/pcm-capture.worklet.ts',
+  },
   format: ['esm'],
   dts: { entry: 'src/index.ts' },
   sourcemap: true,

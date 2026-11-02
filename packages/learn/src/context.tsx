@@ -33,6 +33,10 @@ export const learnPaths = {
   interviewPrep: (prepId: string) => `/interview-prep/${encodeURIComponent(prepId)}`,
   // A mock interview for a prep, by the interview's id (the phone's linkPage 'mock-interview').
   mockInterview: (interviewId: string) => `/mock-interview/${encodeURIComponent(interviewId)}`,
+  // Live practice with a partner (docs/live-practice.md): sessions and "Your voice".
+  livePractice: '/live-practice',
+  livePracticeVoice: '/live-practice/voice',
+  livePracticeSession: (sessionId: string) => `/live-practice/${encodeURIComponent(sessionId)}`,
   progress: '/progress',
   onboarding: '/onboarding',
   settings: '/settings?tab=goal',
@@ -100,6 +104,11 @@ export function useApi(): ApiRequest {
         client.request<T>(path, options),
     [client],
   );
+}
+
+/** The client itself, for what `useApi` can't do (downloads). */
+export function useLearnClient(): LearnClient {
+  return useLearnContext().client;
 }
 
 export function useLearnNavigator(): LearnNavigator {

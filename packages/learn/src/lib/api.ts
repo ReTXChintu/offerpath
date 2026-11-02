@@ -54,9 +54,20 @@ export interface RequestOptions {
   keepalive?: boolean;
 }
 
+export interface DownloadOptions {
+  /** Bytes so far, and the total when the server said it. */
+  onProgress?: (received: number, total: number | null) => void;
+  signal?: AbortSignal;
+}
+
 /** How the learning pages reach the API. */
 export interface LearnClient {
   request<T>(path: string, options?: RequestOptions): Promise<T>;
+  /**
+   * A file's bytes from the API (a GET), for the live-practice speaker model.
+   * Optional: a client without it can't set up the voice.
+   */
+  download?(path: string, options?: DownloadOptions): Promise<ArrayBuffer>;
 }
 
 export interface FetchClientOptions {
@@ -148,7 +159,63 @@ export function createFetchClient(options: FetchClientOptions): LearnClient {
     return payload as T;
   }
 
-  return { request: (path, req = {}) => send(path, req, false) };
+  async function download(path: string, opts: DownloadOptions = {}): Promise<ArrayBuffer> {
+    const token = await options.getToken();
+    let response: Response;
+    try {
+      response = await doFetch(`${base()}${path}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        ...(opts.signal ? { signal: opts.signal } : {}),
+      });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') throw error;
+      throw new ApiError({
+        type: 'urn:offerpath:error:network',
+        title: 'Cannot reach the server',
+        status: 0,
+        detail: 'Cannot reach the Offerpath server. Check your connection and try again.',
+      });
+    }
+    if (!response.ok) {
+      const payload: unknown = await response.json().catch(() => null);
+      throw new ApiError(
+        isProblemDetails(payload)
+          ? payload
+          : {
+              type: 'urn:offerpath:error:unknown',
+              title: 'Download failed',
+              status: response.status,
+            },
+        payload,
+      );
+    }
+    const length = Number(response.headers.get('Content-Length'));
+    const total = Number.isFinite(length) && length > 0 ? length : null;
+    if (!response.body) {
+      const buffer = await response.arrayBuffer();
+      opts.onProgress?.(buffer.byteLength, total);
+      return buffer;
+    }
+    const reader = response.body.getReader();
+    const parts: Uint8Array[] = [];
+    let received = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      parts.push(value);
+      received += value.byteLength;
+      opts.onProgress?.(received, total);
+    }
+    const out = new Uint8Array(received);
+    let offset = 0;
+    for (const part of parts) {
+      out.set(part, offset);
+      offset += part.byteLength;
+    }
+    return out.buffer;
+  }
+
+  return { request: (path, req = {}) => send(path, req, false), download };
 }
 
 function isProblemDetails(value: unknown): value is ProblemDetails {

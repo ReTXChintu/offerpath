@@ -81,5 +81,14 @@ export {
 } from './features/interview-prep/MockInterview';
 export { UpcomingPreps } from './features/interview-prep/UpcomingPreps';
 export { AI_SOURCE_MESSAGE } from './features/interview-prep/shared';
+// Live practice with a partner (docs/live-practice.md).
+export { LivePracticeList } from './features/live-practice/LivePracticeList';
+export { LivePracticeSession } from './features/live-practice/LivePracticeSession';
+export { VoiceSetupPage } from './features/live-practice/VoiceSetup';
+export { PractiseLiveButton } from './features/live-practice/PractiseLiveButton';
+export { LiveDepsProvider, type LiveDeps } from './features/live-practice/deps';
+export * from './lib/live-practice';
+export { canListen, MIC_CONSTRAINTS } from './lib/live/mic';
+export { realtimeProtocols } from './lib/live/realtime';
 export { TodayPage } from './features/today/TodayPage';
 export { DesktopOfflineStrip } from './features/today/DesktopOfflineStrip';

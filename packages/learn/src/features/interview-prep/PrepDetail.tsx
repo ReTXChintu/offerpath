@@ -46,6 +46,8 @@ import {
   type PrepDraft,
   type PrepErrors,
 } from './PrepCreate';
+import { PractiseLiveButton } from '../live-practice/PractiseLiveButton';
+
 import { PrepQuestionCard } from './PrepQuestion';
 import {
   AiSourceNotice,
@@ -132,6 +134,7 @@ export function PrepDetail({ prepId }: { prepId: string }) {
               All preps
             </Button>
             {prep.status === 'READY' ? <MockInterviewButton prep={prep} /> : null}
+            {prep.status === 'READY' ? <PractiseLiveButton prepId={prep.id} /> : null}
             <Button icon="pencil" onClick={() => setEditing(true)}>
               Edit
             </Button>
