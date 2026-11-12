@@ -1,6 +1,6 @@
 {
   "name": "@offerpath/portfolio",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "private": true,
   "description": "The Portfolio section of Offerpath: editing the user's portfolio site content, over the learning side's injected API client.",
   "type": "module",
