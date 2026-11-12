@@ -204,9 +204,29 @@ impl AppContext {
             claude_cli: RwLock::new(None),
         });
         ctx.ensure_user_and_profile()?;
+        ctx.close_interrupted_runs()?;
         tokio::spawn(crate::agent::queue::run_worker(ctx.clone()));
         tracing::info!(data_dir = %ctx.paths.root.display(), mock = ctx.settings().await.mock_mode, "Offerpath core initialised");
         Ok(ctx)
+    }
+
+    /// Runs still open from a previous session were cut off when the app
+    /// closed: no task is driving them any more. Mark them failed, so the
+    /// history and anything watching it doesn't show them running forever.
+    pub fn close_interrupted_runs(&self) -> CoreResult<usize> {
+        let mut closed = 0;
+        for mut run in self.store.find::<AgentRun>(|r| r.finished_at.is_none())? {
+            run.state = AgentState::Failed;
+            run.finished_at = Some(now());
+            run.current_activity = None;
+            run.error = Some("Interrupted: Offerpath closed during this run.".into());
+            self.store.put(&run)?;
+            closed += 1;
+        }
+        if closed > 0 {
+            tracing::info!(closed, "closed runs interrupted by the last shutdown");
+        }
+        Ok(closed)
     }
 
     /// Test/mock constructor with an isolated data directory.
