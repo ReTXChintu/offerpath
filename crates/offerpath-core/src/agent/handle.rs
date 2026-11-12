@@ -94,8 +94,24 @@ impl AgentHandle {
         *self.task.lock().await = Some(task);
     }
 
+    /// Whether `run_id` still owns the agent. Once a run stops for the user
+    /// (e.g. WAITING_FOR_APPROVAL), the queue may start the next run before
+    /// the first one's task has wrapped up; from then on the first run must
+    /// not touch the shared state.
+    fn owns(status: &AgentStatus, run_id: &str) -> bool {
+        status
+            .run_id
+            .as_deref()
+            .is_none_or(|current| current == run_id)
+    }
+
     pub async fn transition(&self, to: AgentState, run_id: &str) -> CoreResult<()> {
         let mut status = self.status.write().await;
+        if !Self::owns(&status, run_id) {
+            return Err(CoreError::InvalidTransition(format!(
+                "run {run_id} no longer owns the agent (another run started)"
+            )));
+        }
         let from = status.state;
         if !can_transition(from, to) {
             return Err(CoreError::InvalidTransition(format!(
@@ -132,14 +148,21 @@ impl AgentHandle {
     pub async fn finish(&self, final_state: AgentState, error: Option<String>, run_id: &str) {
         let mut status = self.status.write().await;
         let from = status.state;
-        status.state = final_state;
-        status.error = error.clone();
-        status.paused = false;
-        status.current_activity = None;
-        status.progress = None;
+        // A newer run already owns the agent: record this run's end, but
+        // leave the newer run's state, stop token and pause flag alone.
+        let current = Self::owns(&status, run_id);
+        if current {
+            status.state = final_state;
+            status.error = error.clone();
+            status.paused = false;
+            status.current_activity = None;
+            status.progress = None;
+        }
         drop(status);
-        *self.cancel.lock().await = None;
-        self.paused.send_replace(false);
+        if current {
+            *self.cancel.lock().await = None;
+            self.paused.send_replace(false);
+        }
         let level = if error.is_some() {
             EventLevel::Error
         } else {
@@ -274,6 +297,56 @@ mod tests {
         h.finish(AgentState::Completed, None, &run.id).await;
         assert_eq!(h.status().await.state, AgentState::Completed);
         assert!(h.begin(&run).await.is_ok());
+    }
+
+    /// What happened on 2026-11-12: a hunt stopped for approval, the queue
+    /// started the next hunt, then the first hunt's task finished. Its
+    /// finish must not release the agent (or the queue starts a third run
+    /// alongside the second), nor take the second run's stop token.
+    #[tokio::test]
+    async fn a_finished_run_cannot_clobber_the_next_one() {
+        let h = AgentHandle::new();
+        let first = AgentRun::new("u", RunKind::JobHunt, true);
+        h.begin(&first).await.unwrap();
+        h.transition(AgentState::Discovering, &first.id)
+            .await
+            .unwrap();
+        h.transition(AgentState::Extracting, &first.id)
+            .await
+            .unwrap();
+        h.transition(AgentState::Analyzing, &first.id)
+            .await
+            .unwrap();
+        h.transition(AgentState::PreparingApplications, &first.id)
+            .await
+            .unwrap();
+        h.transition(AgentState::WaitingForApproval, &first.id)
+            .await
+            .unwrap();
+        assert!(!h.is_busy().await);
+
+        let second = AgentRun::new("u", RunKind::JobHunt, true);
+        let token = h.begin(&second).await.unwrap();
+        h.finish(AgentState::WaitingForApproval, None, &first.id)
+            .await;
+
+        let status = h.status().await;
+        assert_eq!(status.state, AgentState::Initializing);
+        assert_eq!(status.run_id.as_deref(), Some(second.id.as_str()));
+        assert!(h.is_busy().await, "the queue must not start a third run");
+        let third = AgentRun::new("u", RunKind::Application, true);
+        assert!(h.begin(&third).await.is_err());
+        // The old run can't drive the state either.
+        assert!(h
+            .transition(AgentState::Completed, &first.id)
+            .await
+            .is_err());
+        // Stop still reaches the second run.
+        assert!(h.request_stop().await);
+        assert!(token.is_cancelled());
+        h.transition(AgentState::Completed, &second.id)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
