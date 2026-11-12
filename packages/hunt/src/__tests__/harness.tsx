@@ -198,12 +198,20 @@ export function resume(over: Partial<Resume> = {}): Resume {
 export function applicationDetail(
   over: { application?: Partial<Application>; job?: Partial<Job> } = {},
 ): ApplicationDetail {
+  const j = job(over.job);
   return {
     application: application(over.application),
-    job: job(over.job),
+    job: j,
     analysis: analysis(),
     resume: resume(),
     coverLetter: null,
+    email: j.applyEmail
+      ? {
+          to: j.applyEmail,
+          subject: `Application for ${j.title} - Biswajit Panda`,
+          body: 'Hello, my resume is attached.',
+        }
+      : null,
   };
 }
 

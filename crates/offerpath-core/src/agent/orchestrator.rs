@@ -739,12 +739,18 @@ async fn finish_simple(app: &Arc<AppContext>, run_id: &str, result: CoreResult<(
 
 /// Explicit user approval. Records the approval and starts the browser
 /// application task.
+/// Approves an application. For one applied to by email, `email` is the
+/// message exactly as the user reviewed and edited it; it's what gets sent.
 pub async fn approve_application(
     app: Arc<AppContext>,
     application_id: &str,
     apply_now: bool,
+    email: Option<ApplicationEmail>,
 ) -> CoreResult<Application> {
     let mut application: Application = app.store.require(application_id)?;
+    if let Some(email) = email {
+        application.email = Some(email.validated()?);
+    }
     if application.status == ApplicationStatus::Rejected {
         application.transition(ApplicationStatus::ReadyForReview, "reopened")?;
     }

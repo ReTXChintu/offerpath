@@ -17,8 +17,8 @@ use crate::domain::{
 use crate::error::{CoreError, CoreResult};
 
 use super::protocol::{
-    AnswerPayload, AnswerQuestionsPayload, MarkManualCompletePayload, RecordInterviewPayload,
-    RejectPayload, RequestFilePayload, SetStatusPayload, WithId,
+    AnswerPayload, AnswerQuestionsPayload, ApprovePayload, MarkManualCompletePayload,
+    RecordInterviewPayload, RejectPayload, RequestFilePayload, SetStatusPayload, WithId,
 };
 
 #[derive(serde::Deserialize, Default)]
@@ -170,8 +170,9 @@ pub async fn dispatch(app: &Arc<AppContext>, kind: &str, payload: Value) -> Core
             Ok(v)
         }
         "approve_application" => {
-            let WithId { id } = parse(payload)?;
-            let application = orchestrator::approve_application(app.clone(), &id, true).await?;
+            let p: ApprovePayload = parse(payload)?;
+            let application =
+                orchestrator::approve_application(app.clone(), &p.id, true, p.email).await?;
             Ok(serde_json::to_value(application)?)
         }
         "reject_application" => {

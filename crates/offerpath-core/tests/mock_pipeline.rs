@@ -136,7 +136,7 @@ async fn full_job_hunt_produces_reviewable_applications_and_never_submits() {
     );
 
     // Approve → mock apply reports MANUAL_ACTION_REQUIRED (mock never submits).
-    orchestrator::approve_application(ctx.clone(), &first.application.id, true)
+    orchestrator::approve_application(ctx.clone(), &first.application.id, true, None)
         .await
         .unwrap();
     let status = wait_idle(&ctx).await;
@@ -194,7 +194,7 @@ async fn human_input_flow_stores_answers_and_resumes() {
         .unwrap();
     wait_idle(&ctx).await;
     let app_id = ctx.list_applications().unwrap()[0].application.id.clone();
-    orchestrator::approve_application(ctx.clone(), &app_id, false)
+    orchestrator::approve_application(ctx.clone(), &app_id, false, None)
         .await
         .unwrap();
     orchestrator::apply_application(

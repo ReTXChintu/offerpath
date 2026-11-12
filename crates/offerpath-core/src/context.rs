@@ -79,6 +79,10 @@ pub struct ApplicationDetail {
     pub analysis: Option<JobAnalysis>,
     pub resume: Option<Resume>,
     pub cover_letter: Option<CoverLetter>,
+    /// For a job applied to by email: exactly what approving sends (the
+    /// user's edited email, else the one built from the cover letter).
+    #[serde(default)]
+    pub email: Option<ApplicationEmail>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -1022,12 +1026,25 @@ impl AppContext {
             Some(id) => self.store.get::<CoverLetter>(id)?,
             None => None,
         };
+        let personal = self.profile()?.personal;
+        let email = crate::prompts::application_email(
+            &application,
+            &job,
+            &personal,
+            cover_letter.as_ref().map(|c| c.text.as_str()),
+        )
+        .map(|e| ApplicationEmail {
+            to: e.to,
+            subject: e.subject,
+            body: e.body,
+        });
         Ok(ApplicationDetail {
             application,
             job,
             analysis,
             resume,
             cover_letter,
+            email,
         })
     }
 

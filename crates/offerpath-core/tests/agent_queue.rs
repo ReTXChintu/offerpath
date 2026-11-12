@@ -164,7 +164,7 @@ async fn approving_while_busy_queues_the_application() {
         .await
         .unwrap();
     assert!(ctx.agent.is_busy().await);
-    let approved = orchestrator::approve_application(ctx.clone(), &ready.id, true)
+    let approved = orchestrator::approve_application(ctx.clone(), &ready.id, true, None)
         .await
         .unwrap();
     assert_eq!(approved.status, ApplicationStatus::Approved);

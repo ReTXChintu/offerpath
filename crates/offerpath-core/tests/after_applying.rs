@@ -57,7 +57,7 @@ async fn applied_application() -> (Arc<AppContext>, tempfile::TempDir, Applicati
         .find(|a| a.application.status == ApplicationStatus::ReadyForReview)
         .expect("an application ready for review");
     let id = item.application.id.clone();
-    orchestrator::approve_application(ctx.clone(), &id, false)
+    orchestrator::approve_application(ctx.clone(), &id, false, None)
         .await
         .unwrap();
     orchestrator::apply_application(ctx.clone(), &id, false, Some("SUBMITTED".into()))

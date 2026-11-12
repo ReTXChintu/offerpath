@@ -110,7 +110,8 @@ pub async fn start_job_link(
                 if apply_now && application.status == ApplicationStatus::ReadyForReview =>
             {
                 if let Err(e) =
-                    orchestrator::approve_application(app2.clone(), &application.id, true).await
+                    orchestrator::approve_application(app2.clone(), &application.id, true, None)
+                        .await
                 {
                     notify_failure(
                         &app2,

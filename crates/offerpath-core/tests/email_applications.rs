@@ -197,6 +197,87 @@ async fn a_shared_job_becomes_a_review_ready_application_and_a_gmail_draft() {
 }
 
 #[test]
+fn the_email_the_user_edited_is_the_one_sent() {
+    let mut job = Job::new(
+        LOCAL_USER_ID,
+        "LinkedIn Posts",
+        "https://x/2",
+        "Brightpath",
+        "Node.js Developer",
+    );
+    job.apply_email = Some("careers@brightpath.example".into());
+    let mut profile = CandidateProfile::new(LOCAL_USER_ID);
+    profile.personal.name = "Biswajit Panda".into();
+    let truth = CandidateTruth {
+        profile,
+        experiences: vec![],
+        projects: vec![],
+        master_resume_text: None,
+    };
+    let mut app = Application::new(LOCAL_USER_ID, &job.id, &job.url, "LinkedIn Posts");
+
+    // Not edited: the one built from the cover letter, as the review shows it.
+    let shown = prompts::application_email(&app, &job, &truth.profile.personal, Some("Dear team,"))
+        .unwrap();
+    assert_eq!(shown.to, "careers@brightpath.example");
+    assert_eq!(shown.body, "Dear team,");
+
+    // Edited and approved: exactly that goes to Gmail.
+    let edited = ApplicationEmail {
+        to: " hr@brightpath.example ".into(),
+        subject: " Node.js role - Biswajit ".into(),
+        body: "Hi Priya,
+
+My resume is attached.
+"
+        .into(),
+    };
+    app.email = Some(edited.validated().unwrap());
+    app.transition(ApplicationStatus::Analyzed, "").unwrap();
+    app.transition(ApplicationStatus::ReadyForReview, "")
+        .unwrap();
+    app.transition(ApplicationStatus::Approved, "").unwrap();
+    let prompt = prompts::apply_prompt(&ApplyParams {
+        application: &app,
+        job: &job,
+        truth: &truth,
+        resume_pdf: Some("C:/r.pdf"),
+        resume_docx: None,
+        cover_letter_pdf: None,
+        cover_letter_text: Some("Dear team,"),
+        answers: &[],
+        previously_answered: &[],
+        resuming: false,
+    });
+    assert!(prompt.contains("hr@brightpath.example"));
+    assert!(prompt.contains("Node.js role - Biswajit"));
+    assert!(prompt.contains("My resume is attached."));
+    assert!(!prompt.contains("careers@brightpath.example"));
+
+    // What can't be sent is refused before anything is approved.
+    for bad in [
+        ApplicationEmail {
+            to: "a@x.com, b@y.com".into(),
+            ..edited.clone()
+        },
+        ApplicationEmail {
+            to: "not-an-address".into(),
+            ..edited.clone()
+        },
+        ApplicationEmail {
+            subject: "  ".into(),
+            ..edited.clone()
+        },
+        ApplicationEmail {
+            body: "".into(),
+            ..edited.clone()
+        },
+    ] {
+        assert!(bad.validated().is_err(), "{bad:?}");
+    }
+}
+
+#[test]
 fn a_draft_needs_no_address() {
     let job = Job::new(LOCAL_USER_ID, "Shared", "shared://1", "Acme", "Dev");
     let mut profile = CandidateProfile::new(LOCAL_USER_ID);

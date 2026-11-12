@@ -10,6 +10,7 @@ import { useInvoke } from './client';
 import { isAgentRunning } from './logic';
 import type { SkillGroup } from './protocol';
 import type {
+  ApplicationEmail,
   AgentStatus,
   AnswerRecord,
   AppSettings,
@@ -592,7 +593,8 @@ export function useApproveApplication() {
   const inv = useInvalidate();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: { id: string; applyNow?: boolean }) => invoke('approve_application', args),
+    mutationFn: (args: { id: string; applyNow?: boolean; email?: ApplicationEmail }) =>
+      invoke('approve_application', args),
     onSuccess: (_application, args) => {
       // The apply itself waits in the queue while the agent is busy.
       const status = qc.getQueryData<AgentStatus>(keys.agentStatus);

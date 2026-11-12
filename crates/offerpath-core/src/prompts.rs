@@ -422,7 +422,36 @@ pub fn email_message(
     if to.is_empty() {
         return None;
     }
-    Some(compose_email(to, job, truth, cover_letter))
+    Some(compose_email(
+        to,
+        job,
+        &truth.profile.personal,
+        cover_letter,
+    ))
+}
+
+/// The email an email application sends (None when the job isn't applied
+/// to by email): the one the user reviewed and edited when approving, else
+/// [`email_message`]'s, built from [`PersonalInfo`] alone so the review
+/// screen can show it.
+pub fn application_email(
+    application: &Application,
+    job: &Job,
+    personal: &PersonalInfo,
+    cover_letter: Option<&str>,
+) -> Option<EmailMessage> {
+    let to = job.apply_email.as_deref()?.trim();
+    if to.is_empty() {
+        return None;
+    }
+    Some(match &application.email {
+        Some(e) => EmailMessage {
+            to: e.to.clone(),
+            subject: e.subject.clone(),
+            body: e.body.clone(),
+        },
+        None => compose_email(to, job, personal, cover_letter),
+    })
 }
 
 /// The email for a Gmail draft: like [`email_message`], but `to` may be
@@ -433,16 +462,15 @@ pub fn draft_email_message(
     cover_letter: Option<&str>,
 ) -> EmailMessage {
     let to = job.apply_email.as_deref().unwrap_or("").trim();
-    compose_email(to, job, truth, cover_letter)
+    compose_email(to, job, &truth.profile.personal, cover_letter)
 }
 
 fn compose_email(
     to: &str,
     job: &Job,
-    truth: &CandidateTruth,
+    personal: &PersonalInfo,
     cover_letter: Option<&str>,
 ) -> EmailMessage {
-    let personal = &truth.profile.personal;
     let body = match cover_letter.map(str::trim).filter(|c| !c.is_empty()) {
         Some(letter) => letter.to_string(),
         None => {
@@ -524,7 +552,12 @@ Return only the structured output.",
 
 pub fn apply_prompt(p: &ApplyParams<'_>) -> String {
     let approved = p.application.is_approved();
-    if let Some(email) = email_message(p.job, p.truth, p.cover_letter_text) {
+    if let Some(email) = application_email(
+        p.application,
+        p.job,
+        &p.truth.profile.personal,
+        p.cover_letter_text,
+    ) {
         return email_apply_prompt(p, approved, &email);
     }
     let mut s = format!(

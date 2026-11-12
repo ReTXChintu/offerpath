@@ -515,8 +515,14 @@ pub async fn approve_application(
     ctx: Ctx<'_>,
     id: String,
     apply_now: Option<bool>,
+    email: Option<ApplicationEmail>,
 ) -> R<Application> {
-    orchestrator::approve_application(ctx.inner().clone(), &id, apply_now.unwrap_or(true))
+    orchestrator::approve_application(
+        ctx.inner().clone(),
+        &id,
+        apply_now.unwrap_or(true),
+        email,
+    )
         .await
         .map_err(Into::into)
 }

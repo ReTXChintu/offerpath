@@ -12,6 +12,7 @@ import type {
   AnswerRecord,
   AppSettings,
   Application,
+  ApplicationEmail,
   ApplicationAnswer,
   ApplicationDetail,
   ApplicationListItem,
@@ -189,7 +190,10 @@ export interface Commands {
 
   list_applications: { args: NoArgs; result: ApplicationListItem[] };
   get_application: { args: { id: string }; result: ApplicationDetail };
-  approve_application: { args: { id: string; applyNow?: boolean }; result: Application };
+  approve_application: {
+    args: { id: string; applyNow?: boolean; email?: ApplicationEmail };
+    result: Application;
+  };
   reject_application: { args: { id: string; reason?: string }; result: Application };
   apply_application: { args: { id: string; simulate?: string }; result: Submission };
   answer_application_questions: {

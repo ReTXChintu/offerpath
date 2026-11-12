@@ -43,7 +43,12 @@ import {
   useUpdateCoverLetter,
   useUpdateResumeContent,
 } from '../queries';
-import type { ApplicationAnswer, ApplicationStatus, ResumeDocument } from '../types';
+import type {
+  ApplicationAnswer,
+  ApplicationEmail,
+  ApplicationStatus,
+  ResumeDocument,
+} from '../types';
 
 const REPLY_VARIANT: Record<string, BadgeVariant> = {
   INTERVIEW: 'success',
@@ -109,10 +114,20 @@ export function ApplicationReviewPage({ applicationId }: { applicationId: string
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [saveForReuse, setSaveForReuse] = useState(true);
   const [markedSkills, setMarkedSkills] = useState<string[]>([]);
+  // The email an email application sends, as shown and edited here.
+  const [emailDraft, setEmailDraft] = useState<ApplicationEmail | null>(null);
+  const [emailEdited, setEmailEdited] = useState(false);
 
   useEffect(() => {
     if (detail.data?.coverLetter) setCoverDraft(detail.data.coverLetter.text);
   }, [detail.data?.coverLetter]);
+
+  // Follows what the app would send (e.g. after a cover letter edit) until
+  // the user edits the email here.
+  const shownEmail = detail.data?.email ?? null;
+  useEffect(() => {
+    if (!emailEdited) setEmailDraft(shownEmail);
+  }, [shownEmail?.to, shownEmail?.subject, shownEmail?.body, emailEdited]);
 
   if (detail.isLoading) return <Loading label="Loading the application" />;
   if (detail.error || !detail.data)
@@ -131,6 +146,12 @@ export function ApplicationReviewPage({ applicationId }: { applicationId: string
   const actions = applicationActions(application.status);
   const applyUrl = application.applicationUrl || job.url;
   const byEmail = !!job.applyEmail;
+  const emailProblem = byEmail ? applicationEmailProblem(emailDraft) : null;
+  const editEmail = (patch: Partial<ApplicationEmail>) => {
+    setEmailEdited(true);
+    setEmailDraft((e) => ({ ...(e ?? { to: '', subject: '', body: '' }), ...patch }));
+  };
+  const resumeFile = resume?.pdfPath ? resume.pdfPath.split(/[\\/]/).pop() : null;
   const approveLabel = byEmail ? 'Approve & Send email' : 'Approve & Apply';
   const runEvents = activity.filter(
     (e) =>
@@ -186,7 +207,13 @@ export function ApplicationReviewPage({ applicationId }: { applicationId: string
             </Button>
           ) : null}
           {actions.canApprove ? (
-            <Button size="sm" variant="primary" icon="check" onClick={() => setConfirm('approve')}>
+            <Button
+              size="sm"
+              variant="primary"
+              icon="check"
+              disabled={!!emailProblem}
+              onClick={() => setConfirm('approve')}
+            >
               {approveLabel}
             </Button>
           ) : null}
@@ -422,14 +449,63 @@ export function ApplicationReviewPage({ applicationId }: { applicationId: string
               Drafts, review it and send it, then click Mark as Applied.
             </p>
           </Section>
-        ) : byEmail ? (
-          <Section tint="info" py={16}>
-            <p className="t-small" style={{ margin: 0 }}>
-              <strong>Applies by email</strong> to {job.applyEmail}
-              {job.contactName ? ` (posted by ${job.contactName})` : ''}. On approval {appName}{' '}
-              sends it from your Gmail with the resume attached and the cover letter as the message:
-              edit the cover letter below to change what&apos;s sent.
+        ) : byEmail && emailDraft ? (
+          <Section tint="info">
+            <div className="row justify-between items-center g2 wrap mb2">
+              <h2 className="t-eyebrow" style={{ margin: 0 }}>
+                {actions.canApprove ? 'The email that will be sent' : 'The email'}
+              </h2>
+              {actions.canApprove && emailEdited ? (
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  icon="refresh"
+                  onClick={() => {
+                    setEmailEdited(false);
+                    setEmailDraft(shownEmail);
+                  }}
+                >
+                  Undo my edits
+                </Button>
+              ) : null}
+            </div>
+            <p className="t-small text-muted mb3" style={{ marginTop: 0 }}>
+              {actions.canApprove
+                ? `Exactly this is sent from your Gmail when you approve, and nothing else. Edit anything below first.`
+                : 'What was approved to be sent from your Gmail.'}
+              {job.contactName ? ` Posted by ${job.contactName}.` : ''}
             </p>
+            <div className="col g3">
+              <Input
+                aria-label="To"
+                placeholder="To"
+                value={emailDraft.to}
+                readOnly={!actions.canApprove}
+                onChange={(e) => editEmail({ to: e.target.value })}
+              />
+              <Input
+                aria-label="Subject"
+                placeholder="Subject"
+                value={emailDraft.subject}
+                readOnly={!actions.canApprove}
+                onChange={(e) => editEmail({ subject: e.target.value })}
+              />
+              <Textarea
+                aria-label="Message"
+                rows={12}
+                value={emailDraft.body}
+                readOnly={!actions.canApprove}
+                onChange={(e) => editEmail({ body: e.target.value })}
+              />
+              <span className="t-caption">
+                Attached: {resumeFile ?? 'the resume for this application (not generated yet)'}
+              </span>
+              {actions.canApprove && emailProblem ? (
+                <span className="t-caption text-danger" role="alert">
+                  {emailProblem}
+                </span>
+              ) : null}
+            </div>
           </Section>
         ) : null}
 
@@ -743,6 +819,7 @@ export function ApplicationReviewPage({ applicationId }: { applicationId: string
                 variant="primary"
                 size="lg"
                 icon="check"
+                disabled={!!emailProblem}
                 onClick={() => setConfirm('approve')}
               >
                 {approveLabel}
@@ -760,15 +837,24 @@ export function ApplicationReviewPage({ applicationId }: { applicationId: string
         title={byEmail ? 'Approve and send the email?' : 'Approve and apply?'}
         description={
           byEmail
-            ? `${appName} will open Gmail in Chrome and send one email to ${job.applyEmail} with the subject "Application for ${job.title}", your cover letter below as the message, and this resume attached. It sends only after the attachment is in, and never emails anyone else.`
+            ? `${appName} will open Gmail in Chrome and send the email shown above, exactly as it is, to ${emailDraft?.to.trim() ?? job.applyEmail} with the subject "${emailDraft?.subject.trim() ?? ''}" and this resume attached. It sends only after the attachment is in, and never emails anyone else.`
             : `${appName} will open ${job.company}'s application in Chrome and fill it with this resume${coverLetter ? ' and cover letter' : ''}. It only submits after every required field is filled, and stops to ask you about anything it cannot answer.`
         }
         confirmLabel={approveLabel}
         loading={approve.isPending}
         onConfirm={() =>
           approve.mutate(
-            { id: application.id, applyNow: true },
-            { onSuccess: () => setConfirm(null) },
+            {
+              id: application.id,
+              applyNow: true,
+              ...(byEmail && emailDraft ? { email: emailDraft } : {}),
+            },
+            {
+              onSuccess: () => {
+                setConfirm(null);
+                setEmailEdited(false);
+              },
+            },
           )
         }
       />
@@ -810,4 +896,15 @@ export function ApplicationReviewPage({ applicationId }: { applicationId: string
       />
     </div>
   );
+}
+
+/** Why an application email can't be sent as it is; null when it can. */
+export function applicationEmailProblem(email: ApplicationEmail | null): string | null {
+  if (!email) return 'The email is still being prepared.';
+  const to = email.to.trim();
+  if (!/^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/.test(to)) return 'Add one valid recipient address.';
+  if (!email.subject.trim()) return 'Add a subject.';
+  if (email.subject.trim().length > 300) return 'The subject is too long (300 characters at most).';
+  if (!email.body.trim()) return 'Write a message.';
+  return null;
 }

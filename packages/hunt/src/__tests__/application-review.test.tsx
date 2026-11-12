@@ -57,18 +57,50 @@ describe('ApplicationReview: approval', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   });
 
-  it('says it will send an email when the job applies by email', async () => {
+  it('shows the exact email, and approving sends it as edited', async () => {
     const user = userEvent.setup();
-    renderReview(
+    const { callsTo } = renderReview(
       applicationDetail({ job: { applyEmail: 'hiring@acme.test', contactName: 'Priya' } }),
     );
 
-    expect(await screen.findByText(/Applies by email/)).toBeInTheDocument();
+    expect(await screen.findByText('The email that will be sent')).toBeInTheDocument();
+    expect(screen.getByLabelText('To')).toHaveValue('hiring@acme.test');
+    const subject = screen.getByLabelText('Subject');
+    await user.clear(subject);
+    await user.type(subject, 'Node.js role - Biswajit');
+    const message = screen.getByLabelText('Message');
+    await user.clear(message);
+    await user.type(message, 'Hi Priya, my resume is attached.');
+
     const [approve] = screen.getAllByRole('button', { name: 'Approve & Send email' });
     await user.click(approve!);
     const dialog = screen.getByRole('dialog', { name: 'Approve and send the email?' });
-    expect(dialog).toHaveTextContent('send one email to hiring@acme.test');
+    expect(dialog).toHaveTextContent('exactly as it is, to hiring@acme.test');
+    expect(dialog).toHaveTextContent('Node.js role - Biswajit');
     expect(dialog).toHaveTextContent('never emails anyone else');
+    await user.click(within(dialog).getByRole('button', { name: 'Approve & Send email' }));
+    await waitFor(() => expect(callsTo('approve_application')).toHaveLength(1));
+    expect(callsTo('approve_application')[0]).toEqual({
+      id: 'app-1',
+      applyNow: true,
+      email: {
+        to: 'hiring@acme.test',
+        subject: 'Node.js role - Biswajit',
+        body: 'Hi Priya, my resume is attached.',
+      },
+    });
+  });
+
+  it("won't approve an email it can't send", async () => {
+    const user = userEvent.setup();
+    renderReview(applicationDetail({ job: { applyEmail: 'hiring@acme.test' } }));
+    const to = await screen.findByLabelText('To');
+    await user.clear(to);
+    await user.type(to, 'a@x.com, b@y.com');
+    expect(screen.getByRole('alert')).toHaveTextContent('Add one valid recipient address.');
+    for (const b of screen.getAllByRole('button', { name: 'Approve & Send email' })) {
+      expect(b).toBeDisabled();
+    }
   });
 
   it('warns that nothing is submitted in mock mode', async () => {

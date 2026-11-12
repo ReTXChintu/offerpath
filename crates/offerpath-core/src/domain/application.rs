@@ -218,11 +218,55 @@ pub struct Application {
     /// to review and send (jobs they shared).
     #[serde(default)]
     pub email_drafted_at: Option<DateTime<Utc>>,
+    /// The email an email application sends, exactly as the user reviewed
+    /// and edited it when approving. None: built from the posting and the
+    /// cover letter.
+    #[serde(default)]
+    pub email: Option<ApplicationEmail>,
     /// Interviews the user recorded for this application, oldest first.
     #[serde(default)]
     pub interviews: Vec<Interview>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+/// An application email: one recipient, a subject and a plain-text body.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplicationEmail {
+    pub to: String,
+    pub subject: String,
+    pub body: String,
+}
+
+impl ApplicationEmail {
+    /// Trimmed, or why it can't be sent: one valid address, a subject of
+    /// at most 300 characters and a body of at most 20,000.
+    pub fn validated(&self) -> CoreResult<ApplicationEmail> {
+        let to = self.to.trim();
+        let subject = self.subject.trim();
+        let body = self.body.trim();
+        if !crate::util::looks_like_email(to) || to.contains([',', ';', ' ']) {
+            return Err(CoreError::Validation(
+                "The email needs one valid recipient address.".into(),
+            ));
+        }
+        if subject.is_empty() || subject.chars().count() > 300 {
+            return Err(CoreError::Validation(
+                "The email needs a subject (at most 300 characters).".into(),
+            ));
+        }
+        if body.is_empty() || body.chars().count() > 20_000 {
+            return Err(CoreError::Validation(
+                "The email needs a message (at most 20,000 characters).".into(),
+            ));
+        }
+        Ok(ApplicationEmail {
+            to: to.to_string(),
+            subject: subject.to_string(),
+            body: body.to_string(),
+        })
+    }
 }
 
 /// One email from an employer about an application, found by the inbox
@@ -290,6 +334,7 @@ impl Application {
             manual_completed: false,
             replies: vec![],
             email_drafted_at: None,
+            email: None,
             interviews: vec![],
             created_at: ts,
             updated_at: ts,

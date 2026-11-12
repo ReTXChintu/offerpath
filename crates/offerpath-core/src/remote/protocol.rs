@@ -55,6 +55,16 @@ pub struct WithId {
     pub id: String,
 }
 
+/// `approve_application`: for an email application, the email exactly as
+/// the user reviewed and edited it.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApprovePayload {
+    pub id: String,
+    #[serde(default)]
+    pub email: Option<crate::domain::ApplicationEmail>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RejectPayload {

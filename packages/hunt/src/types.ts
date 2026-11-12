@@ -389,6 +389,8 @@ export interface Application {
   replies: EmailReply[];
   /** Saved as a Gmail draft for the user to review and send (shared jobs). */
   emailDraftedAt: string | null;
+  /** The email as the user edited it when approving; null: built from the cover letter. */
+  email?: ApplicationEmail | null;
   /** Interviews the user recorded for this application, oldest first. */
   interviews: Interview[];
   createdAt: string;
@@ -746,12 +748,21 @@ export interface ApplicationListItem {
   analysis: JobAnalysis | null;
 }
 
+/** An application email: one recipient, a subject and a plain-text body. */
+export interface ApplicationEmail {
+  to: string;
+  subject: string;
+  body: string;
+}
+
 export interface ApplicationDetail {
   application: Application;
   job: Job;
   analysis: JobAnalysis | null;
   resume: Resume | null;
   coverLetter: CoverLetter | null;
+  /** For a job applied to by email: exactly what approving sends. */
+  email?: ApplicationEmail | null;
 }
 
 export interface DashboardCounts {
